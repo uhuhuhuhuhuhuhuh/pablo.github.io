@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="16px" height="9px" viewBox="0 0 16 9" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <g id="03-Icons" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="03-Icons-/-16px-/-Chevron-/-Down" transform="translate(0.000000, -4.000000)" fill="#ffffff">
+            <path d="M8,9.68292222 L14.3492086,4.2407434 C14.7685345,3.88132125 15.3998345,3.92988278 15.7592566,4.34920863 C16.1186788,4.76853447 16.0701172,5.39983445 15.6507914,5.7592566 L8,12.3170778 L0.349208627,5.7592566 C-0.0701172162,5.39983445 -0.118678753,4.76853447 0.240743398,4.34920863 C0.600165549,3.92988278 1.23146553,3.88132125 1.65079137,4.2407434 L8,9.68292222 Z" id="Color"></path>
+        </g>
+    </g>
+</svg>
