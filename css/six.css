@@ -1,6 +1,11 @@
 body {
- background-image: url("Sideways-Winky-Face-Flash-Fiction-by-Adam-Lock.png");
- background-color: #000000;
+  background-image: url("Sideways-Winky-Face-Flash-Fiction-by-Adam-Lock.png");
+
+  height: 100%;
+
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 h1 {
