@@ -17,8 +17,10 @@ function resetProgress(){progress.value=0;progressText.textContent='';}
 async function refreshKnowledgeStatus(extra=''){
   try{
     const s=await knowledgeSummary();
-    knowledgeStatus.textContent=`Local knowledge: ${s.samples.toLocaleString()} samples across ${s.profiles.toLocaleString()} profiles from ${s.files.toLocaleString()} analyzed files (${formatBytes(s.bytes)} observed).${extra?' '+extra:''}`;
-  }catch{knowledgeStatus.textContent='Local knowledge is unavailable in this browser.';}
+    const local=`Private browser knowledge: ${s.samples.toLocaleString()} samples across ${s.profiles.toLocaleString()} profiles from ${s.files.toLocaleString()} analyzed files (${formatBytes(s.bytes)} observed).`;
+    const pub=s.publicProfiles?` Public baseline: ${s.publicProfiles.toLocaleString()} profiles trained from ${s.publicFiles.toLocaleString()} public files (${formatBytes(s.publicBytes)} observed).`:'';
+    knowledgeStatus.textContent=local+pub+(extra?' '+extra:'');
+  }catch{knowledgeStatus.textContent='Adaptive knowledge is unavailable in this browser.';}
 }
 
 async function loadKnowledgeForSelected(){
@@ -26,7 +28,12 @@ async function loadKnowledgeForSelected(){
   try{
     currentKnowledge=await getKnowledgeSnapshot(selectedFile);
     const k=currentKnowledge;
-    if(k.dictionary.length) status.textContent=`IC2.1 found ${formatBytes(k.dictionary.length)} of local learned dictionary material for this file profile from ${k.sampleCount.toLocaleString()} stored samples.`;
+    if(k.dictionary.length){
+      const parts=[];
+      if(k.localDictionaryBytes)parts.push(`${formatBytes(k.localDictionaryBytes)} private/local`);
+      if(k.publicDictionaryBytes)parts.push(`${formatBytes(k.publicDictionaryBytes)} public baseline`);
+      status.textContent=`IC2.1 found ${formatBytes(k.dictionary.length)} of adaptive dictionary material for this file profile${parts.length?` (${parts.join(' + ')})`:''}.`;
+    }
   }catch{currentKnowledge=null;}
 }
 
@@ -34,7 +41,7 @@ function showFile(file){
   selectedFile=file;currentUrl='';resultBox.hidden=true;shareLink.value='';
   $('#file-name').textContent=file.name;$('#file-size').textContent=formatBytes(file.size);$('#file-type').textContent=file.type||inferMime(file.name);$('#file-ext').textContent=extension(file.name);
   dropZone.hidden=true;fileCard.hidden=false;clearButton.hidden=false;createButton.disabled=false;details.hidden=true;
-  status.textContent=`No fixed source-file cap. IC2.1 streams the source, checks local knowledge, and keeps only representations that remain exact and self-contained. The final public token is limited to ${MAX_TOKEN_CHARS.toLocaleString()} characters.`;
+  status.textContent=`No fixed source-file cap. IC2.1 streams the source, checks adaptive knowledge, and keeps only representations that remain exact and self-contained. The final public token is limited to ${MAX_TOKEN_CHARS.toLocaleString()} characters.`;
   resetProgress();loadKnowledgeForSelected();
 }
 function clearFile(){if(busy)return;selectedFile=null;currentKnowledge=null;currentUrl='';fileInput.value='';fileCard.hidden=true;dropZone.hidden=false;clearButton.hidden=true;createButton.disabled=true;resultBox.hidden=true;shareLink.value='';details.hidden=true;status.textContent='Choose a file to begin.';resetProgress();}
@@ -45,8 +52,8 @@ function representationHtml(stats){
   const rows=entries.map(([name,bytes])=>`<div class="rep-row"><span>${name}</span><strong>${formatBytes(bytes)}</strong></div>`).join('');
   const k=stats?.knowledge||{};
   const learned=k.dictionaryUsed
-    ? `<div class="knowledge-gain">Local knowledge used · ${k.dictionaryUses.toLocaleString()} dictionary chunks · net descriptor saving ${formatBytes(k.dictionarySavings)}</div>`
-    : k.availableDictionaryBytes?`<div class="knowledge-gain muted">Local knowledge was tested but did not beat the self-contained alternatives after dictionary overhead.</div>`:'';
+    ? `<div class="knowledge-gain">Adaptive knowledge used · ${k.dictionaryUses.toLocaleString()} dictionary chunks · net descriptor saving ${formatBytes(k.dictionarySavings)}</div>`
+    : k.availableDictionaryBytes?`<div class="knowledge-gain muted">Available knowledge was tested but did not beat the self-contained alternatives after dictionary overhead.</div>`:'';
   return `<div class="rep-grid">${rows}</div>${learned}<div class="rep-foot">${stats.chunks.toLocaleString()} CDC chunks → ${stats.segments.toLocaleString()} manifest segments · ${formatBytes(stats.embeddedBytes)} embedded payload</div>`;
 }
 
@@ -54,9 +61,9 @@ async function createShare(){
   if(!selectedFile||busy)return;
   if(worker)worker.terminate();
   if(!currentKnowledge)await loadKnowledgeForSelected();
-  worker=new Worker('./ic2-worker.js?v=20260812ic21',{type:'module'});setBusy(true);resultBox.hidden=true;details.hidden=true;resetProgress();
+  worker=new Worker('./ic2-worker.js?v=20260812ic21pub',{type:'module'});setBusy(true);resultBox.hidden=true;details.hidden=true;resetProgress();
   const k=currentKnowledge;
-  status.textContent=k?.dictionary?.length?`Starting IC2.1 analysis with ${formatBytes(k.dictionary.length)} of learned dictionary material…`:'Starting IC2.1 analysis…';
+  status.textContent=k?.dictionary?.length?`Starting IC2.1 analysis with ${formatBytes(k.dictionary.length)} of adaptive dictionary material…`:'Starting IC2.1 analysis…';
   worker.onmessage=async(event)=>{
     const m=event.data||{};
     if(m.type==='progress'){
@@ -71,7 +78,7 @@ async function createShare(){
       const mode=m.outerMode==='Z'?'Zstandard':m.outerMode==='G'?'gzip':'raw';
       $('#share-summary').textContent=`IC2.1 · ${url.length.toLocaleString()} URL characters · ${formatBytes(m.packedBytes)} packed manifest · outer ${mode}`;
       details.innerHTML=representationHtml(m.stats);details.hidden=false;resultBox.hidden=false;
-      status.textContent='Ready to share. Useful structural samples were retained locally so later related files can be tested against what this browser learned.';
+      status.textContent='Ready to share. Useful structural samples were retained privately in this browser, while any repository knowledge pack remains a read-only public baseline.';
       progress.value=1;progressText.textContent='100%';setBusy(false);worker?.terminate();worker=null;currentKnowledge=null;await refreshKnowledgeStatus();
       resultBox.scrollIntoView({behavior:'smooth',block:'nearest'});return;
     }
@@ -90,7 +97,7 @@ async function trainArchive(){
       else if(p.phase==='learned')knowledgeStatus.textContent=`Archive.org training: learned from ${p.trained}/${p.target} files (${formatBytes(p.size)} latest).`;
       else knowledgeStatus.textContent=`Archive.org training: inspecting ${p.title||'public-domain item'}…`;
     }});
-    await refreshKnowledgeStatus(`Archive.org run added ${result.trained} files totaling ${formatBytes(result.totalBytes)}.`);
+    await refreshKnowledgeStatus(`Archive.org run added ${result.trained} private/local training files totaling ${formatBytes(result.totalBytes)}.`);
     currentKnowledge=null;if(selectedFile)await loadKnowledgeForSelected();
   }catch(error){knowledgeStatus.textContent=`Archive.org training could not complete: ${error?.message||String(error)}`;}
   finally{archiveButton.disabled=false;clearKnowledgeButton.disabled=false;}
@@ -106,6 +113,6 @@ fileInput.addEventListener('change',()=>{const f=fileInput.files?.[0];if(f)showF
 cancelButton.addEventListener('click',()=>{if(worker){worker.postMessage({type:'cancel'});worker.terminate();worker=null;}setBusy(false);status.textContent='Encoding cancelled.';});
 copyButton.addEventListener('click',copyCurrentLink);openButton.addEventListener('click',()=>currentUrl&&window.open(currentUrl,'_blank','noopener,noreferrer'));newLinkButton.addEventListener('click',createShare);
 archiveButton.addEventListener('click',trainArchive);
-clearKnowledgeButton.addEventListener('click',async()=>{if(busy)return;clearKnowledgeButton.disabled=true;try{await clearKnowledge();currentKnowledge=null;await refreshKnowledgeStatus('Local learning was cleared.');if(selectedFile)await loadKnowledgeForSelected();}finally{clearKnowledgeButton.disabled=false;}});
+clearKnowledgeButton.addEventListener('click',async()=>{if(busy)return;clearKnowledgeButton.disabled=true;try{await clearKnowledge();currentKnowledge=null;await refreshKnowledgeStatus('Private browser learning was cleared; the repository public baseline was not changed.');if(selectedFile)await loadKnowledgeForSelected();}finally{clearKnowledgeButton.disabled=false;}});
 refreshKnowledgeStatus();
-if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js?v=20260812ic21').catch(()=>{});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js?v=20260812ic21pub').catch(()=>{});
