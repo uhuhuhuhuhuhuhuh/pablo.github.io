@@ -64,7 +64,7 @@
     </section>
 
     <section id="panel-regex" class="panel">
-      <div class="card"><div class="notice">Loading Babel regex candidate search…</div></div>
+      <div class="card"><div class="notice">Loading validated Babel regex candidate search…</div></div>
     </section>
 
     <section id="panel-xl" class="panel">
@@ -103,16 +103,16 @@
     </section>
 
     <section id="panel-about" class="panel">
-      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>The Babel Regex tab generates filenames that satisfy your regex, generates deterministic candidate byte objects within your minimum/maximum size constraints, and maps those bytes into the same Babel-compatible address space. The filename is a candidate label; Babel itself maps bytes and does not store filename metadata.</p><p>For candidate objects up to 64 KiB, the full literal Babel path is generated. Larger candidate objects use a compact deterministic XL recipe because a literal path can contain millions or billions of directory levels.</p><p>Everything executes as JavaScript in this browser tab. GitHub Pages only serves these static files.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
+      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>The Babel Regex tab generates filenames that satisfy your regex, generates deterministic candidate byte objects within your minimum/maximum size constraints, validates those objects against the expected file type, and maps accepted bytes into the same Babel-compatible address space. The filename is a candidate label; Babel itself maps bytes and does not store filename metadata.</p><p>Format-aware generation currently supports PDF, PNG, ZIP, JSON, text/CSV/Markdown, GGUF, and Safetensors. Small candidates are fully materialized and structurally validated. Larger supported candidates use a compact format-aware virtual recipe because a literal path can contain millions or billions of directory levels.</p><p>Everything executes as JavaScript in this browser tab. GitHub Pages only serves these static files.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
     </section>
   </main>
 
   <footer>Infinite Corridor · static client-side experiment inspired by p2r3/babel-usb · 4,900 doors at every literal Babel level.</footer>
 </div>
 <div id="toast" class="toast"></div>
-<script type="module" src="./app.js?v=20260812g"></script>
-<script type="module" src="./filename-search.js?v=20260812g"></script>
-<script type="module" src="./filefinder.js?v=20260812g"></script>
-<script type="module" src="./largefile.js?v=20260812g"></script>
+<script type="module" src="./app.js?v=20260812h"></script>
+<script type="module" src="./validated-babel-regex.js?v=20260812h"></script>
+<script type="module" src="./filefinder.js?v=20260812h"></script>
+<script type="module" src="./largefile.js?v=20260812h"></script>
 </body>
 </html>
