@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#07090d">
+  <title>Infinite Corridor Share</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./xl.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand"><div class="mark">∞</div><div><h1>INFINITE CORRIDOR</h1><small>public pointer resolver</small></div></div>
+    <div class="status">PUBLIC SHARE</div>
+  </header>
+  <main>
+    <section class="panel active">
+      <div id="share-resolver" class="card"><div class="notice">Resolving public pointer…</div></div>
+    </section>
+  </main>
+  <footer>Infinite Corridor · public pointer resolver</footer>
+</div>
+<script type="module">
+import { pathToBytes, formatBytes } from './codec.js?v=20260812share1';
+
+const target = document.querySelector('#share-resolver');
+const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+
+function parsePointer() {
+  const api = new URLSearchParams(location.search).get('api') || '';
+  if (!api) throw new Error('This share link is missing its registry origin.');
+  const apiUrl = new URL(api);
+  if (apiUrl.protocol !== 'https:' && apiUrl.hostname !== 'localhost') throw new Error('Registry origin must use HTTPS.');
+  const raw = location.hash.replace(/^#/, '');
+  const slash = raw.indexOf('/');
+  const id = decodeURIComponent(slash >= 0 ? raw.slice(0, slash) : raw);
+  const filename = decodeURIComponent(slash >= 0 ? raw.slice(slash + 1) : '');
+  if (!/^[1-9A-HJ-NP-Za-km-z]{8,32}$/.test(id)) throw new Error('Invalid public pointer.');
+  return { api: apiUrl.origin, id, filename };
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function download(bytes, manifest) {
+  const blob = new Blob([bytes], { type: manifest.mime || 'application/octet-stream' });
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = manifest.filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function load() {
+  const pointer = parsePointer();
+  const response = await fetch(`${pointer.api}/api/shares/${encodeURIComponent(pointer.id)}`);
+  const manifest = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(manifest.error || `Registry returned HTTP ${response.status}.`);
+
+  document.title = `${manifest.filename} · Infinite Corridor`;
+  const common = `<span class="eyebrow">Public pointer ${esc(manifest.id)}</span><h3>${esc(manifest.filename)}</h3>
+    <div class="regex-meta"><span>${esc(formatBytes(manifest.size))}</span><span>${esc(manifest.mime)}</span><span>${esc(manifest.kind)}</span>${manifest.sha256?`<span>SHA-256 ${esc(manifest.sha256.slice(0,16))}…</span>`:''}</div>`;
+
+  if (manifest.kind === 'babel') {
+    target.innerHTML = `${common}<div class="notice" style="margin-top:16px">This pointer resolves to a literal self-contained Babel path. The original bytes are reconstructed locally in this browser; the registry stores the manifest, not a conventional uploaded file.</div><div id="resolve-status" class="muted" style="margin-top:12px">Reconstructing bytes from the Babel path…</div><div class="button-row"><button id="resolve-download" disabled>Download ${esc(manifest.filename)}</button><a class="secondary" href="./index.html">Open Infinite Corridor</a></div>`;
+    await new Promise(requestAnimationFrame);
+    const bytes = pathToBytes(manifest.payload);
+    if (bytes.length !== manifest.size) throw new Error(`Reconstructed ${bytes.length} bytes but manifest expects ${manifest.size}.`);
+    let hashNote = '';
+    if (manifest.sha256) {
+      const actual = await sha256Hex(bytes);
+      if (actual !== manifest.sha256) throw new Error('SHA-256 integrity check failed after Babel reconstruction.');
+      hashNote = ' · SHA-256 verified';
+    }
+    document.querySelector('#resolve-status').textContent = `Reconstructed ${formatBytes(bytes.length)} locally${hashNote}.`;
+    const button = document.querySelector('#resolve-download');
+    button.disabled = false;
+    button.onclick = () => download(bytes, manifest);
+    return;
+  }
+
+  if (manifest.kind === 'recipe') {
+    const hash = new URLSearchParams();
+    hash.set('tab','xl');
+    hash.set('recipe',manifest.payload);
+    const xlUrl = `./index.html#${hash.toString()}`;
+    target.innerHTML = `${common}<div class="notice" style="margin-top:16px">This pointer resolves to a reproducible XL recipe. Open it in XL Objects to stream the deterministic object to disk without exposing the full recipe in the public short URL.</div><div class="button-row"><a href="${esc(xlUrl)}"><button>Open recipe in XL</button></a><button id="copy-recipe" class="secondary">Copy underlying recipe</button></div>`;
+    document.querySelector('#copy-recipe').onclick = async event => {
+      await navigator.clipboard.writeText(manifest.payload);
+      const button = event.currentTarget, old = button.textContent;
+      button.textContent = 'Copied'; setTimeout(() => button.textContent = old, 900);
+    };
+    return;
+  }
+
+  throw new Error(`Unsupported share kind: ${manifest.kind}`);
+}
+
+load().catch(error => {
+  target.innerHTML = `<div class="notice error"><strong>Could not resolve this share.</strong><br>${esc(error.message)}</div><div class="button-row"><a href="./index.html"><button class="secondary">Open Infinite Corridor</button></a></div>`;
+});
+</script>
+</body>
+</html>
