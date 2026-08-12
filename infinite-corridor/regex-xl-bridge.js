@@ -1,4 +1,11 @@
-const $ = (s) => document.querySelector(s);
+function openRecipeInNewTab(address) {
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams();
+  params.set('tab', 'xl');
+  params.set('recipe', address);
+  url.hash = params.toString();
+  window.open(url.toString(), '_blank', 'noopener,noreferrer');
+}
 
 function installOpenButtons() {
   document.querySelectorAll('#regex-results article.regex-result').forEach(article => {
@@ -11,20 +18,16 @@ function installOpenButtons() {
     const row = article.querySelector('.button-row');
     if (!row) return;
     const button = document.createElement('button');
+    button.type = 'button';
     button.className = 'secondary';
-    button.textContent = 'Open in XL';
-    button.addEventListener('click', () => {
-      const input = $('#xl-address-input');
-      if (!input) return;
-      input.value = address;
-      document.querySelector('[data-tab="xl"]')?.click();
-      requestAnimationFrame(() => $('#xl-load-address')?.click());
-    });
+    button.textContent = 'Open XL in new tab';
+    button.title = 'Open this recipe in a separate XL Objects tab';
+    button.addEventListener('click', () => openRecipeInNewTab(address));
     row.appendChild(button);
   });
 }
 
-const target = $('#regex-results');
+const target = document.querySelector('#regex-results');
 if (target) {
   new MutationObserver(installOpenButtons).observe(target, { childList: true, subtree: true });
   installOpenButtons();
