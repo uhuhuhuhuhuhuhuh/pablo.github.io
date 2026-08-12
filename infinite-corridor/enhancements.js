@@ -4,7 +4,7 @@ const $ = (s) => document.querySelector(s);
 const encoder = new TextEncoder();
 const HARD_MAX_BYTES = 1024 ** 4; // 1 TiB
 const HARD_REPEAT_CAP = 4096;
-const HARD_BUDGET = 50000;
+const HARD_BUDGET = 10_000_000;
 
 function downloadBytes(bytes, name) {
   const blob = new Blob([bytes], { type: 'application/octet-stream' });
@@ -203,7 +203,7 @@ function addDeepControls() {
       <div><label for="regex-min-bytes">Minimum bytes</label><input id="regex-min-bytes" type="number" min="0" max="${HARD_MAX_BYTES}" value="0"></div>
       <div><label for="regex-max-bytes">Maximum bytes (up to 1 TiB)</label><input id="regex-max-bytes" type="number" min="1" max="${HARD_MAX_BYTES}" value="4096"></div>
       <div><label for="regex-repeat-cap">Unbounded repeat cap</label><input id="regex-repeat-cap" type="number" min="1" max="${HARD_REPEAT_CAP}" value="256"></div>
-      <div><label for="regex-budget">Candidate attempts</label><input id="regex-budget" type="number" min="100" max="${HARD_BUDGET}" value="5000"></div>
+      <div><label for="regex-budget">Candidate attempts (up to 10,000,000)</label><input id="regex-budget" type="number" min="100" max="${HARD_BUDGET}" value="5000"></div>
       <div><label>Ranking</label><div class="pill" style="display:inline-block">Largest/deepest first</div></div>
     </div>
     <div id="regex-deep-status" class="muted" style="margin-top:12px">Ready.</div>`;
@@ -231,6 +231,7 @@ async function runDeepRegex() {
     const seen = new Set();
     const candidates = [];
     const poolLimit = Math.max(1000, count * 25);
+    const yieldEvery = budget > 500000 ? 2000 : budget > 100000 ? 1000 : 250;
 
     button.disabled = true;
     target.innerHTML = '<div class="notice">Synthesizing deeper regex candidates…</div>';
@@ -253,7 +254,7 @@ async function runDeepRegex() {
         candidates.length = poolLimit;
       }
 
-      if ((attempt + 1) % 250 === 0) {
+      if ((attempt + 1) % yieldEvery === 0) {
         if (status) status.textContent = `${(attempt + 1).toLocaleString()} / ${budget.toLocaleString()} attempts · ${candidates.length.toLocaleString()} in byte range`;
         await new Promise(resolve => setTimeout(resolve, 0));
       }
