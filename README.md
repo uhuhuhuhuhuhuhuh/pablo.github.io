@@ -17,7 +17,11 @@ The salt is deliberately not part of reconstruction. It is not encryption.
 
 ## Current limits
 
-The browser UI caps source files at 32 MiB and caps the resulting ICS1 token at 1,500,000 characters. In practice, self-contained links are best suited to small files or highly compressible content. Already-compressed video, archives, PNG/JPEG images, and similar formats may produce links that are too long for practical sharing.
+There is no fixed source-file size cap in the browser UI. A source file is accepted as long as the browser can process it and the final self-contained ICS1 token fits within the current 1,500,000-character share-link safety ceiling.
+
+An incompressible file can fit only about 1.07 MiB of raw data within that token ceiling because Base64URL expands binary data. Much larger source files can still work when gzip compresses them sufficiently. Highly compressible text, JSON, CSV, logs, and similar data can therefore be far larger than already-compressed video, ZIP, PNG/JPEG, and similar formats.
+
+Very large source files can require substantial browser memory during encoding. If the final token exceeds the configured link limit, the share is rejected rather than producing a truncated or invalid URL.
 
 ## Deployment
 
