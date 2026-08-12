@@ -2,11 +2,11 @@ import { bytesToPath, normalizePath, estimatedDepth, formatBytes } from './codec
 
 const $ = (s) => document.querySelector(s);
 const MAX_LITERAL_BYTES = 64 * 1024;
-const MAX_LOCAL_FILE_BYTES = 256 * 1024 ** 3;
-const HASH_CHUNK_BYTES = 16 * 1024 * 1024;
-const MAX_RESULTS = 10000;
+const HARD_MAX_BYTES = 1024 ** 4; // 1 TiB
+const HARD_REPEAT_CAP = 4096;
+const HARD_BUDGET = 10_000_000;
+const MAX_RESULTS = 500;
 
-let entries = [];
 let currentResults = [];
 
 function escapeHtml(value) {
@@ -15,311 +15,361 @@ function escapeHtml(value) {
   }[c]));
 }
 
-function basename(value) {
-  const normalized = String(value || '').replaceAll('\\', '/').replace(/\/+$/, '');
-  return normalized.split('/').pop() || normalized;
+function base64urlEncode(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 }
 
-function filenameFromUrl(value) {
-  try {
-    const url = new URL(value);
-    return decodeURIComponent(basename(url.pathname)) || url.hostname;
-  } catch {
-    return basename(value);
-  }
-}
-
-function toSize(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-function normalizeCatalogEntry(value, sourceLabel = 'Imported catalog') {
-  if (typeof value === 'string') {
-    const line = value.trim();
-    if (!line) return null;
-    const isUrl = /^https?:\/\//i.test(line);
-    return {
-      kind: 'catalog',
-      name: isUrl ? filenameFromUrl(line) : basename(line),
-      path: isUrl ? filenameFromUrl(line) : line,
-      url: isUrl ? line : '',
-      size: null,
-      source: sourceLabel,
-    };
-  }
-
-  if (!value || typeof value !== 'object') return null;
-  const url = String(value.url || value.href || value.download_url || value.downloadUrl || '');
-  const path = String(value.path || value.relativePath || value.relative_path || value.filename || value.name || (url ? filenameFromUrl(url) : ''));
-  const name = String(value.name || value.filename || basename(path) || (url ? filenameFromUrl(url) : ''));
-  if (!name) return null;
-
-  return {
-    kind: 'catalog',
-    name,
-    path: path || name,
-    url,
-    size: toSize(value.size ?? value.bytes ?? value.contentLength ?? value.content_length),
-    source: String(value.source || sourceLabel),
-  };
-}
-
-function parseCsvLine(line) {
-  const out = [];
-  let value = '';
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (quoted) {
-      if (ch === '"' && line[i + 1] === '"') { value += '"'; i++; }
-      else if (ch === '"') quoted = false;
-      else value += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === ',') { out.push(value.trim()); value = ''; }
-    else value += ch;
-  }
-  out.push(value.trim());
-  return out;
-}
-
-function parseCatalogText(text, filename = 'catalog.txt', sourceLabel = 'Imported catalog') {
-  const trimmed = text.trim();
-  if (!trimmed) return [];
-
-  if (filename.toLowerCase().endsWith('.json') || trimmed.startsWith('[') || trimmed.startsWith('{')) {
-    const parsed = JSON.parse(trimmed);
-    const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.files) ? parsed.files : (Array.isArray(parsed.entries) ? parsed.entries : [parsed]));
-    return list.map(item => normalizeCatalogEntry(item, sourceLabel)).filter(Boolean);
-  }
-
-  if (filename.toLowerCase().endsWith('.csv')) {
-    const lines = trimmed.split(/\r?\n/).filter(Boolean);
-    if (!lines.length) return [];
-    const first = parseCsvLine(lines[0]);
-    const headerNames = first.map(x => x.toLowerCase());
-    const known = ['name','filename','path','url','href','size','bytes','source'];
-    const hasHeader = headerNames.some(x => known.includes(x));
-    const start = hasHeader ? 1 : 0;
-    const rows = [];
-    for (let i = start; i < lines.length; i++) {
-      const cols = parseCsvLine(lines[i]);
-      if (hasHeader) {
-        const obj = {};
-        headerNames.forEach((key, idx) => { obj[key] = cols[idx] ?? ''; });
-        rows.push(normalizeCatalogEntry(obj, sourceLabel));
-      } else {
-        rows.push(normalizeCatalogEntry({ path: cols[0] || '', url: cols[1] || '', size: cols[2] || '' }, sourceLabel));
-      }
-    }
-    return rows.filter(Boolean);
-  }
-
-  return trimmed.split(/\r?\n/).map(line => normalizeCatalogEntry(line, sourceLabel)).filter(Boolean);
-}
-
-function dedupe(items) {
-  const seen = new Set();
-  const out = [];
-  for (const item of items) {
-    const key = item.kind === 'local'
-      ? `local\0${item.path}\0${item.size}`
-      : `catalog\0${item.name}\0${item.path}\0${item.url}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
-}
-
-function compileRegex(raw, caseInsensitive) {
+function regexParts(raw) {
   raw = raw.trim();
   if (!raw) throw new Error('Enter a filename regex.');
-
-  let source = raw;
-  let flags = caseInsensitive ? 'i' : '';
   if (raw.startsWith('/')) {
     const last = raw.lastIndexOf('/');
-    if (last > 0) {
-      source = raw.slice(1, last);
-      flags = raw.slice(last + 1);
-      if (caseInsensitive && !flags.includes('i')) flags += 'i';
+    if (last > 0) return { source: raw.slice(1, last), flags: raw.slice(last + 1).replace(/[gy]/g, '') };
+  }
+  return { source: raw, flags: '' };
+}
+
+class FilenameRegexParser {
+  constructor(source, repeatCap) {
+    this.s = source;
+    this.i = 0;
+    this.repeatCap = repeatCap;
+  }
+
+  parse() {
+    const node = this.expression();
+    if (this.i !== this.s.length) throw new Error(`Unexpected token near ${this.s.slice(this.i, this.i + 16)}`);
+    return node;
+  }
+
+  expression(stop = '') {
+    const alts = [this.sequence(stop)];
+    while (this.s[this.i] === '|') {
+      this.i++;
+      alts.push(this.sequence(stop));
     }
+    return alts.length === 1 ? alts[0] : { t: 'alt', a: alts };
   }
 
-  flags = [...new Set(flags.replace(/[gy]/g, '').split(''))].join('');
-  return new RegExp(source, flags);
-}
-
-function formatMaybeSize(size) {
-  return size === null || size === undefined ? 'size unknown' : formatBytes(size);
-}
-
-function updateIndexStatus(extra = '') {
-  const localCount = entries.filter(x => x.kind === 'local').length;
-  const catalogCount = entries.length - localCount;
-  const el = $('#filename-index-status');
-  if (!el) return;
-  el.textContent = `${entries.length.toLocaleString()} indexed names · ${localCount.toLocaleString()} local · ${catalogCount.toLocaleString()} catalog${extra ? ` · ${extra}` : ''}`;
-}
-
-function renderEmpty(message) {
-  $('#regex-results').innerHTML = `<div class="notice">${escapeHtml(message)}</div>`;
-}
-
-function resultActions(item, index) {
-  if (item.kind === 'local') {
-    return `<div class="button-row" style="margin-top:0"><button class="secondary filename-map" data-i="${index}">Map real bytes</button></div>`;
+  sequence(stop) {
+    const items = [];
+    while (this.i < this.s.length && this.s[this.i] !== stop && this.s[this.i] !== '|') {
+      items.push(this.quantified(this.atom()));
+    }
+    return { t: 'seq', a: items };
   }
-  if (item.url) {
-    return `<div class="button-row" style="margin-top:0"><button class="secondary filename-open" data-i="${index}">Open source</button><button class="secondary filename-copy-url" data-i="${index}">Copy URL</button></div>`;
+
+  atom() {
+    const c = this.s[this.i++];
+    if (c === '(') {
+      if (this.s.slice(this.i, this.i + 2) === '?:') this.i += 2;
+      else if (this.s[this.i] === '?') throw new Error('Lookarounds are valid for matching but cannot be generatively enumerated. Rewrite the pattern without lookarounds.');
+      const node = this.expression(')');
+      if (this.s[this.i++] !== ')') throw new Error('Unclosed group.');
+      return node;
+    }
+    if (c === '[') return { t: 'set', a: this.charClass() };
+    if (c === '.') return { t: 'set', a: [...'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 _-.'] };
+    if (c === '\\') return { t: 'set', a: this.escapeSet() };
+    if (c === '^' || c === '$') return { t: 'lit', v: '' };
+    if ('*+?{}'.includes(c)) throw new Error(`Quantifier ${c} has no target.`);
+    if (c === undefined) throw new Error('Unexpected end of regex.');
+    return { t: 'lit', v: c };
   }
-  return '<span class="pill">name only</span>';
+
+  escapeSet() {
+    const c = this.s[this.i++];
+    if (c === 'd') return [...'0123456789'];
+    if (c === 'w') return [...'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_'];
+    if (c === 's') return [' ', '\t'];
+    if (c === 'n') return ['\n'];
+    if (c === 'r') return ['\r'];
+    if (c === 't') return ['\t'];
+    if (!c) throw new Error('Trailing escape.');
+    if (/^[1-9]$/.test(c)) throw new Error('Backreferences cannot be generatively enumerated.');
+    return [c];
+  }
+
+  charClass() {
+    const negated = this.s[this.i] === '^';
+    if (negated) throw new Error('Negated character classes cannot be generatively enumerated safely.');
+    const out = [];
+    let first = true;
+    while (this.i < this.s.length && (this.s[this.i] !== ']' || first)) {
+      first = false;
+      let start;
+      if (this.s[this.i] === '\\') {
+        this.i++;
+        const set = this.escapeSet();
+        if (set.length > 1) {
+          out.push(...set);
+          continue;
+        }
+        start = set[0];
+      } else {
+        start = this.s[this.i++];
+      }
+      if (this.s[this.i] === '-' && this.s[this.i + 1] !== ']') {
+        this.i++;
+        let end;
+        if (this.s[this.i] === '\\') {
+          this.i++;
+          const set = this.escapeSet();
+          if (set.length !== 1) throw new Error('Character-class range endpoint must be one character.');
+          end = set[0];
+        } else end = this.s[this.i++];
+        for (let code = start.charCodeAt(0); code <= end.charCodeAt(0); code++) out.push(String.fromCharCode(code));
+      } else out.push(start);
+    }
+    if (this.s[this.i++] !== ']') throw new Error('Unclosed character class.');
+    if (!out.length) throw new Error('Empty character class.');
+    return [...new Set(out)];
+  }
+
+  quantified(node) {
+    const c = this.s[this.i];
+    if (!c || !'*+?{'.includes(c)) return node;
+    let min;
+    let max;
+    if (c === '?') {
+      this.i++;
+      min = 0; max = 1;
+    } else if (c === '*') {
+      this.i++;
+      min = 0; max = this.repeatCap;
+    } else if (c === '+') {
+      this.i++;
+      min = 1; max = this.repeatCap;
+    } else {
+      this.i++;
+      const m = this.s.slice(this.i).match(/^(\d+)(?:,(\d*)?)?\}/);
+      if (!m) throw new Error('Invalid {m,n} quantifier.');
+      this.i += m[0].length;
+      min = Number(m[1]);
+      max = m[0].includes(',') ? (m[2] ? Number(m[2]) : Math.max(min, this.repeatCap)) : min;
+      if (min > HARD_REPEAT_CAP || max > HARD_REPEAT_CAP) throw new Error(`A single repetition is capped at ${HARD_REPEAT_CAP.toLocaleString()}.`);
+    }
+    if (max < min) throw new Error('Quantifier maximum is smaller than minimum.');
+    return { t: 'rep', n: node, min, max };
+  }
 }
 
-function renderResults(results, totalMatches, searchedCount) {
+function pick(values) {
+  return values[Math.floor(Math.random() * values.length)];
+}
+
+function biasedCount(min, max, mode) {
+  if (max <= min) return min;
+  const span = max - min;
+  if (mode === 'max') return max;
+  if (mode === 'deep') return min + Math.floor(Math.pow(Math.random(), 0.28) * (span + 1));
+  return min + Math.floor(Math.random() * (span + 1));
+}
+
+function generateName(node, mode) {
+  if (node.t === 'lit') return node.v;
+  if (node.t === 'set') return pick(node.a);
+  if (node.t === 'seq') return node.a.map(x => generateName(x, mode)).join('');
+  if (node.t === 'alt') return generateName(pick(node.a), mode);
+  if (node.t === 'rep') {
+    const count = biasedCount(node.min, node.max, mode);
+    let out = '';
+    for (let i = 0; i < count; i++) out += generateName(node.n, mode);
+    return out;
+  }
+  return '';
+}
+
+function unescapeLiteral(text) {
+  return text.replace(/\\([\\.^$|?*+(){}\[\]-])/g, '$1');
+}
+
+function detectSimpleNumericPattern(source) {
+  const m = source.match(/^([^\[|()]*)\[0-9\]\{(\d+)\}([^\[|()]*)$/);
+  if (!m) return null;
+  const width = Number(m[2]);
+  if (!Number.isInteger(width) || width < 1 || width > 15) return null;
+  return { prefix: unescapeLiteral(m[1]), width, suffix: unescapeLiteral(m[3]) };
+}
+
+function fnv1a(text) {
+  const bytes = new TextEncoder().encode(text);
+  let h = 0x811c9dc5;
+  for (const b of bytes) {
+    h ^= b;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h || 0x9e3779b9;
+}
+
+function fillDeterministicBytes(size, seedText) {
+  const out = new Uint8Array(size);
+  let x = fnv1a(seedText);
+  for (let i = 0; i < out.length; i++) {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >>> 17; x >>>= 0;
+    x ^= x << 5; x >>>= 0;
+    out[i] = x & 0xff;
+  }
+  return out;
+}
+
+function chooseSize(min, max, mode) {
+  if (max <= min) return min;
+  const span = max - min;
+  if (mode === 'max') return max;
+  if (mode === 'deep') return min + Math.floor(Math.pow(Math.random(), 0.25) * (span + 1));
+  return min + Math.floor(Math.random() * (span + 1));
+}
+
+function makeSeed(filename, size, ordinal) {
+  return `babel-regex|${filename}|${size}|${ordinal}`;
+}
+
+function makeLargeRecipe(filename, size, ordinal) {
+  const seed = makeSeed(filename, size, ordinal);
+  return { seed, address: `ICXL1:${size}:seeded:${base64urlEncode(seed)}` };
+}
+
+function downloadBytes(bytes, filename) {
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'corridor-candidate.bin';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function renderResults(results, attempts) {
   currentResults = results;
-  const summary = `<div class="notice"><strong>${totalMatches.toLocaleString()} matching filenames</strong><br><span class="muted">Showing ${results.length.toLocaleString()} of ${totalMatches.toLocaleString()} matches from ${searchedCount.toLocaleString()} indexed entries. Regex is applied to real indexed names; it does not synthesize missing filenames.</span></div>`;
-  const rows = results.map((item, idx) => {
-    const detail = item.path && item.path !== item.name ? item.path : (item.url || item.source || '');
-    const depth = item.size === null || item.size === undefined ? '' : ` · ~${estimatedDepth(item.size).toLocaleString()} literal levels`;
-    return `<article class="regex-result filename-result" data-result="${idx}">
-      <div><span class="eyebrow">${item.kind === 'local' ? 'Local file' : 'Catalog entry'}</span><strong>${escapeHtml(item.name)}</strong><div class="regex-meta"><span>${escapeHtml(formatMaybeSize(item.size))}</span><span>${escapeHtml(item.source || '')}${depth}</span></div></div>
-      <code title="${escapeHtml(detail)}">${escapeHtml(detail || item.name)}</code>
-      ${resultActions(item, idx)}
-      <div class="filename-map-output" data-output="${idx}" style="grid-column:1/-1"></div>
+  const literalCount = results.filter(x => x.kind === 'literal').length;
+  const virtualCount = results.length - literalCount;
+  const summary = `<div class="notice"><strong>${results.length.toLocaleString()} Babel candidates</strong><br><span class="muted">${attempts.toLocaleString()} candidate attempts · ${literalCount.toLocaleString()} literal paths · ${virtualCount.toLocaleString()} XL recipes. Filenames are generated from the regex; candidate bytes are deterministic from filename + size + candidate seed.</span></div>`;
+  const rows = results.map((r, idx) => {
+    const address = r.kind === 'literal' ? r.path : r.recipe;
+    const shown = address.length > 520 ? `${address.slice(0, 250)}…${address.slice(-250)}` : address;
+    return `<article class="regex-result" data-babel-result="${idx}">
+      <div><span class="eyebrow">${r.kind === 'literal' ? 'Literal Babel candidate' : 'Large virtual candidate'}</span><strong>${escapeHtml(r.filename)}</strong><div class="regex-meta"><span>${formatBytes(r.size)}</span><span>${r.depth.toLocaleString()} levels${r.kind === 'virtual' ? ' estimated' : ''}</span></div></div>
+      <code title="${escapeHtml(address)}">${escapeHtml(shown)}</code>
+      <div class="button-row" style="margin-top:0"><button class="secondary babel-copy" data-i="${idx}">Copy ${r.kind === 'literal' ? 'address' : 'recipe'}</button>${r.kind === 'literal' ? `<button class="secondary babel-download" data-i="${idx}">Download</button>` : `<button class="secondary babel-open-xl" data-i="${idx}">Open in XL</button>`}</div>
     </article>`;
   }).join('');
   $('#regex-results').innerHTML = summary + rows;
 
-  document.querySelectorAll('.filename-open').forEach(btn => {
-    btn.onclick = () => {
-      const item = currentResults[Number(btn.dataset.i)];
-      window.open(item.url, '_blank', 'noopener,noreferrer');
-    };
-  });
-
-  document.querySelectorAll('.filename-copy-url').forEach(btn => {
+  document.querySelectorAll('.babel-copy').forEach(btn => {
     btn.onclick = async () => {
-      const item = currentResults[Number(btn.dataset.i)];
-      await navigator.clipboard.writeText(item.url);
+      const r = currentResults[Number(btn.dataset.i)];
+      await navigator.clipboard.writeText(r.kind === 'literal' ? r.path : r.recipe);
       const old = btn.textContent;
       btn.textContent = 'Copied';
       setTimeout(() => { btn.textContent = old; }, 900);
     };
   });
 
-  document.querySelectorAll('.filename-map').forEach(btn => {
-    btn.onclick = () => mapLocalResult(Number(btn.dataset.i), btn);
+  document.querySelectorAll('.babel-download').forEach(btn => {
+    btn.onclick = () => {
+      const r = currentResults[Number(btn.dataset.i)];
+      downloadBytes(r.bytes, r.filename);
+    };
+  });
+
+  document.querySelectorAll('.babel-open-xl').forEach(btn => {
+    btn.onclick = () => {
+      const r = currentResults[Number(btn.dataset.i)];
+      $('#xl-size').value = String(r.size);
+      $('#xl-unit').value = 'B';
+      $('#xl-mode').value = 'seeded';
+      $('#xl-seed').value = r.seed;
+      $('#xl-filename').value = r.filename;
+      $('#xl-mode').dispatchEvent(new Event('change'));
+      $('#xl-size').dispatchEvent(new Event('input'));
+      $('#xl-seed').dispatchEvent(new Event('input'));
+      document.querySelector('[data-tab="xl"]')?.click();
+    };
   });
 }
 
-async function mapLocalResult(index, button) {
-  const item = currentResults[index];
-  if (!item?.file) return;
-  const output = document.querySelector(`[data-output="${index}"]`);
-  if (!output) return;
-
-  if (item.file.size > MAX_LOCAL_FILE_BYTES) {
-    output.innerHTML = `<div class="notice error">${escapeHtml(item.name)} exceeds the 256 GiB local-file mapping limit.</div>`;
-    return;
-  }
-
-  button.disabled = true;
-  try {
-    if (item.file.size <= MAX_LITERAL_BYTES) {
-      output.innerHTML = '<div class="notice">Reading file and calculating literal Corridor address…</div>';
-      const bytes = new Uint8Array(await item.file.arrayBuffer());
-      const path = bytesToPath(bytes);
-      const depth = normalizePath(path).length;
-      const shown = path.length > 12000 ? `${path.slice(0, 6000)}\n… ${path.length - 12000} characters omitted …\n${path.slice(-6000)}` : path;
-      output.innerHTML = `<div class="notice"><strong>Real file bytes mapped</strong><br>${formatBytes(item.file.size)} · ${depth.toLocaleString()} levels</div><label style="margin-top:10px">Literal Corridor address</label><textarea class="mono result-path" readonly>${escapeHtml(shown)}</textarea><div class="button-row"><button class="secondary filename-copy-path">Copy full address</button></div>`;
-      output.querySelector('.filename-copy-path').onclick = async (event) => {
-        await navigator.clipboard.writeText(path);
-        event.currentTarget.textContent = 'Copied';
-      };
-      return;
-    }
-
-    const token = { cancelled: false };
-    output.innerHTML = `<div class="notice warn">The real file is ${formatBytes(item.file.size)}. Its literal Babel path would require roughly ${estimatedDepth(item.file.size).toLocaleString()} levels, so the browser will calculate an ICFILE1 content locator instead.</div><progress class="filename-map-progress" max="100" value="0" style="width:100%;margin-top:12px"></progress><div class="muted filename-map-status" style="margin-top:8px">Starting…</div><div class="button-row"><button class="secondary filename-cancel-map">Cancel</button></div>`;
-    output.querySelector('.filename-cancel-map').onclick = () => { token.cancelled = true; };
-    const progress = output.querySelector('.filename-map-progress');
-    const status = output.querySelector('.filename-map-status');
-    const locator = await contentLocator(item.file, token, (done, total, processed) => {
-      const pct = total ? (done / total) * 100 : 100;
-      progress.value = pct;
-      status.textContent = `${pct.toFixed(2)}% · ${formatBytes(processed)} / ${formatBytes(item.file.size)} · ${done.toLocaleString()} / ${total.toLocaleString()} chunks`;
-    });
-    output.innerHTML = `<div class="notice"><strong>Real file fingerprint complete</strong><br>${formatBytes(item.file.size)} · estimated literal depth ${estimatedDepth(item.file.size).toLocaleString()} levels</div><label style="margin-top:10px">ICFILE1 locator</label><textarea class="mono result-path" readonly>${locator}</textarea><div class="button-row"><button class="secondary filename-copy-locator">Copy locator</button></div>`;
-    output.querySelector('.filename-copy-locator').onclick = async (event) => {
-      await navigator.clipboard.writeText(locator);
-      event.currentTarget.textContent = 'Copied';
-    };
-  } catch (error) {
-    output.innerHTML = `<div class="notice ${error?.name === 'AbortError' ? 'warn' : 'error'}">${error?.name === 'AbortError' ? 'Mapping cancelled.' : escapeHtml(error.message)}</div>`;
-  } finally {
-    button.disabled = false;
-  }
-}
-
-function hex(bytes) {
-  return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function sha256(buffer) {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', buffer));
-}
-
-async function contentLocator(file, token, onProgress) {
-  const chunkHashes = [];
-  const totalChunks = Math.ceil(file.size / HASH_CHUNK_BYTES);
-  for (let i = 0; i < totalChunks; i++) {
-    if (token.cancelled) throw new DOMException('Cancelled', 'AbortError');
-    const start = i * HASH_CHUNK_BYTES;
-    const end = Math.min(file.size, start + HASH_CHUNK_BYTES);
-    const chunk = await file.slice(start, end).arrayBuffer();
-    chunkHashes.push(await sha256(chunk));
-    onProgress?.(i + 1, totalChunks, end);
-    if ((i + 1) % 4 === 0) await new Promise(requestAnimationFrame);
-  }
-  const manifest = new Uint8Array(chunkHashes.length * 32);
-  chunkHashes.forEach((digest, i) => manifest.set(digest, i * 32));
-  const root = await sha256(manifest);
-  return `ICFILE1:${file.size}:${HASH_CHUNK_BYTES}:${hex(root)}`;
-}
-
-async function runFilenameSearch() {
+async function runBabelRegexSearch() {
   const button = $('#regex-generate');
+  const status = $('#babel-regex-status');
+  const target = $('#regex-results');
   try {
-    const re = compileRegex($('#regex-input').value, $('#filename-case-insensitive').checked);
-    const scope = $('#filename-scope').value;
-    const limit = Math.min(MAX_RESULTS, Math.max(1, Number($('#regex-count').value) || 100));
-    const results = [];
-    let totalMatches = 0;
+    const raw = $('#regex-input').value;
+    const { source, flags } = regexParts(raw);
+    const repeatCap = Math.max(1, Math.min(HARD_REPEAT_CAP, Number($('#regex-repeat-cap').value) || 256));
+    const ast = new FilenameRegexParser(source, repeatCap).parse();
+    const validator = new RegExp(`^(?:${source})$`, flags.replace(/[gy]/g, ''));
+    const simpleNumeric = detectSimpleNumericPattern(source);
+    const numericStart = Math.max(0, Number($('#regex-numeric-start').value) || 0);
+    const count = Math.min(MAX_RESULTS, Math.max(1, Number($('#regex-count').value) || 100));
+    const budget = Math.min(HARD_BUDGET, Math.max(1, Number($('#regex-budget').value) || 5000));
+    const minBytes = Math.max(0, Math.min(HARD_MAX_BYTES, Number($('#regex-min-bytes').value) || 0));
+    const maxBytes = Math.max(1, Math.min(HARD_MAX_BYTES, Number($('#regex-max-bytes').value) || 65536));
+    const mode = $('#regex-depth-mode').value;
+    if (minBytes > maxBytes) throw new Error('Minimum bytes cannot be larger than maximum bytes.');
 
     button.disabled = true;
-    $('#regex-results').innerHTML = '<div class="notice">Searching indexed filenames…</div>';
+    target.innerHTML = '<div class="notice">Exploring Babel candidates…</div>';
+    status.textContent = 'Starting candidate search…';
 
-    for (let i = 0; i < entries.length; i++) {
-      const item = entries[i];
-      const haystack = scope === 'path' ? (item.path || item.name) : item.name;
-      re.lastIndex = 0;
-      if (re.test(haystack)) {
-        totalMatches++;
-        if (results.length < limit) results.push(item);
+    const seen = new Set();
+    const results = [];
+    let attempts = 0;
+    const numericLimit = simpleNumeric ? 10 ** simpleNumeric.width : 0;
+
+    while (attempts < budget && results.length < count) {
+      let filename;
+      if (simpleNumeric) {
+        const n = (numericStart + attempts) % numericLimit;
+        filename = `${simpleNumeric.prefix}${String(n).padStart(simpleNumeric.width, '0')}${simpleNumeric.suffix}`;
+      } else {
+        filename = generateName(ast, mode);
       }
-      if ((i + 1) % 50000 === 0) await new Promise(requestAnimationFrame);
+      attempts++;
+
+      validator.lastIndex = 0;
+      if (!validator.test(filename)) continue;
+
+      const size = chooseSize(minBytes, maxBytes, mode);
+      const key = `${filename}\0${size}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const ordinal = attempts - 1;
+      const depth = estimatedDepth(size);
+      if (size <= MAX_LITERAL_BYTES) {
+        const seed = makeSeed(filename, size, ordinal);
+        const bytes = fillDeterministicBytes(size, seed);
+        const path = bytesToPath(bytes);
+        results.push({ kind: 'literal', filename, size, depth: normalizePath(path).length, bytes, path, seed, ordinal });
+      } else {
+        const large = makeLargeRecipe(filename, size, ordinal);
+        results.push({ kind: 'virtual', filename, size, depth, recipe: large.address, seed: large.seed, ordinal });
+      }
+
+      if (attempts % 250 === 0) {
+        status.textContent = `${attempts.toLocaleString()} / ${budget.toLocaleString()} attempts · ${results.length.toLocaleString()} results`;
+        await new Promise(requestAnimationFrame);
+      }
     }
 
-    if (!totalMatches) {
-      renderEmpty(`No indexed filenames matched. ${entries.length ? 'Try a broader regex or load another folder/catalog.' : 'Load a local folder or import a catalog first.'}`);
+    if (!results.length) {
+      target.innerHTML = '<div class="notice warn">No candidates were generated under the current regex and size constraints.</div>';
+      status.textContent = `Finished ${attempts.toLocaleString()} attempts with no results.`;
       return;
     }
-    renderResults(results, totalMatches, entries.length);
+
+    results.sort((a, b) => mode === 'balanced' ? a.ordinal - b.ordinal : b.size - a.size || a.ordinal - b.ordinal);
+    renderResults(results, attempts);
+    const largest = results.reduce((a, b) => a.size >= b.size ? a : b);
+    status.textContent = `Finished ${attempts.toLocaleString()} attempts · ${results.length.toLocaleString()} results · largest ${formatBytes(largest.size)} / ${largest.depth.toLocaleString()} levels.`;
   } catch (error) {
-    $('#regex-results').innerHTML = `<div class="notice error">${escapeHtml(error.message)}</div>`;
+    target.innerHTML = `<div class="notice error">${escapeHtml(error.message)}</div>`;
+    status.textContent = 'Search stopped because the regex or byte constraints are invalid.';
   } finally {
     button.disabled = false;
   }
@@ -330,97 +380,34 @@ function installUi() {
   const tab = document.querySelector('[data-tab="regex"]');
   if (!panel || !tab) return;
 
-  tab.textContent = 'Filename Regex';
+  tab.textContent = 'Babel Regex';
   panel.innerHTML = `
     <div class="card">
-      <span class="eyebrow">Real filename index</span>
-      <h3>Regex filename search</h3>
-      <p class="help">Search real filenames from a folder you select or a catalog you import. This replaces synthetic regex generation. The browser does not invent matches: a result exists only if its filename is actually present in the loaded index. Local files can be mapped from their real bytes.</p>
+      <span class="eyebrow">Filename → candidate bytes → Babel address</span>
+      <h3>Babel regex candidate search</h3>
+      <p class="help">Generate candidate filenames from a regex, choose a byte-size range, then deterministically generate candidate bytes and map them through the same Babel-compatible byte-to-path codec used by Infinite Corridor. This explores the mathematical Babel address space; it does not claim that a generated filename corresponds to a real external file.</p>
       <div class="grid-2">
         <div><label for="regex-input">Filename regex</label><input id="regex-input" class="mono" type="text" value="EFTA[0-9]{8}\\.pdf"></div>
-        <div><label for="regex-count">Maximum results</label><input id="regex-count" type="number" min="1" max="${MAX_RESULTS}" value="100"></div>
-        <div><label for="filename-scope">Match against</label><select id="filename-scope" class="input"><option value="name" selected>Filename only</option><option value="path">Relative/full catalog path</option></select></div>
-        <div><label>Options</label><label class="xl-check"><input id="filename-case-insensitive" type="checkbox"><span>Case-insensitive</span></label></div>
+        <div><label for="regex-count">Results</label><input id="regex-count" type="number" min="1" max="${MAX_RESULTS}" value="100"></div>
       </div>
-      <div class="button-row"><button id="regex-generate">Search indexed filenames</button><button id="filename-clear" class="secondary">Clear index</button></div>
-      <div id="filename-index-status" class="muted" style="margin-top:12px">0 indexed names</div>
+      <div class="grid-3" style="margin-top:16px">
+        <div><label for="regex-min-bytes">Minimum bytes</label><input id="regex-min-bytes" type="number" min="0" max="${HARD_MAX_BYTES}" value="1"></div>
+        <div><label for="regex-max-bytes">Maximum bytes (up to 1 TiB)</label><input id="regex-max-bytes" type="number" min="1" max="${HARD_MAX_BYTES}" value="65536"></div>
+        <div><label for="regex-depth-mode">Size/depth bias</label><select id="regex-depth-mode" class="input"><option value="deep" selected>Bias larger/deeper</option><option value="max">Always maximum bytes</option><option value="balanced">Balanced/random</option></select></div>
+        <div><label for="regex-budget">Candidate attempts (up to 10,000,000)</label><input id="regex-budget" type="number" min="1" max="${HARD_BUDGET}" value="5000"></div>
+        <div><label for="regex-repeat-cap">Open-ended regex repeat cap</label><input id="regex-repeat-cap" type="number" min="1" max="${HARD_REPEAT_CAP}" value="256"></div>
+        <div><label for="regex-numeric-start">Numeric start / offset</label><input id="regex-numeric-start" type="number" min="0" value="0"></div>
+      </div>
+      <div class="notice" style="margin-top:16px"><strong>Numeric patterns:</strong> simple fixed-width patterns such as <code>EFTA[0-9]{8}\\.pdf</code> are enumerated sequentially. Set Numeric start to <code>2822476</code> to begin at <code>EFTA02822476.pdf</code>.</div>
+      <div class="button-row"><button id="regex-generate">Search Babel candidates</button></div>
+      <div id="babel-regex-status" class="muted" style="margin-top:12px">Ready.</div>
     </div>
+    <div id="regex-results"><div class="notice">Enter a filename regex and byte-size constraints, then search the Babel candidate space.</div></div>`;
 
-    <div class="grid-2">
-      <div class="card">
-        <span class="eyebrow">Local filesystem</span><h3>Index a folder</h3>
-        <p class="help">Choose a directory. Only names, paths, sizes, and browser File references stay in this tab. Nothing is uploaded.</p>
-        <input id="filename-folder-input" class="input" type="file" webkitdirectory directory multiple>
-      </div>
-      <div class="card">
-        <span class="eyebrow">Portable catalog</span><h3>Import a filename catalog</h3>
-        <p class="help">Accepts JSON, CSV, or newline-delimited TXT. JSON entries may contain <code>name</code>, <code>path</code>, <code>url</code>, and <code>size</code>. Catalog entries can be searched even when the file bytes are not local.</p>
-        <input id="filename-catalog-input" class="input" type="file" accept=".json,.csv,.txt,application/json,text/csv,text/plain">
-        <div style="margin-top:12px"><label for="filename-catalog-url">Or load a CORS-enabled catalog URL</label><div class="path-wrap"><input id="filename-catalog-url" type="text" placeholder="https://example.com/files.json"><button id="filename-load-url" class="secondary">Load URL</button></div></div>
-      </div>
-    </div>
-    <div id="regex-results"><div class="notice">Load a local folder or filename catalog, then run a regex search.</div></div>`;
-
-  $('#filename-folder-input').onchange = (event) => {
-    const files = [...(event.target.files || [])];
-    const local = files.map(file => ({
-      kind: 'local',
-      name: file.name,
-      path: file.webkitRelativePath || file.name,
-      url: '',
-      size: file.size,
-      source: 'Local folder',
-      file,
-    }));
-    entries = dedupe([...entries, ...local]);
-    updateIndexStatus(`added ${local.length.toLocaleString()} local files`);
-  };
-
-  $('#filename-catalog-input').onchange = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const imported = parseCatalogText(await file.text(), file.name, file.name);
-      entries = dedupe([...entries, ...imported]);
-      updateIndexStatus(`added ${imported.length.toLocaleString()} catalog entries`);
-    } catch (error) {
-      updateIndexStatus(`catalog error: ${error.message}`);
-    }
-  };
-
-  $('#filename-load-url').onclick = async () => {
-    const url = $('#filename-catalog-url').value.trim();
-    if (!url) return;
-    const button = $('#filename-load-url');
-    button.disabled = true;
-    try {
-      const response = await fetch(url, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const text = await response.text();
-      const imported = parseCatalogText(text, new URL(url).pathname, url);
-      entries = dedupe([...entries, ...imported]);
-      updateIndexStatus(`added ${imported.length.toLocaleString()} entries from URL`);
-    } catch (error) {
-      updateIndexStatus(`URL catalog error: ${error.message}`);
-    } finally {
-      button.disabled = false;
-    }
-  };
-
-  $('#filename-clear').onclick = () => {
-    entries = [];
-    currentResults = [];
-    $('#filename-folder-input').value = '';
-    $('#filename-catalog-input').value = '';
-    updateIndexStatus('cleared');
-    renderEmpty('Index cleared. Load a folder or catalog to search real filenames.');
-  };
-
-  $('#regex-generate').onclick = runFilenameSearch;
+  $('#regex-generate').onclick = runBabelRegexSearch;
   $('#regex-input').addEventListener('keydown', event => {
-    if (event.key === 'Enter') runFilenameSearch();
+    if (event.key === 'Enter') runBabelRegexSearch();
   });
-  updateIndexStatus();
 }
 
 installUi();
