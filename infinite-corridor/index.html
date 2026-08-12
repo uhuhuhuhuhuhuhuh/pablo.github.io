@@ -64,7 +64,7 @@
     </section>
 
     <section id="panel-regex" class="panel">
-      <div class="card"><div class="notice">Loading non-blocking validated Babel regex search…</div></div>
+      <div class="card"><div class="notice">Loading worker-based content-inspected Babel regex search…</div></div>
     </section>
 
     <section id="panel-xl" class="panel">
@@ -103,18 +103,18 @@
     </section>
 
     <section id="panel-about" class="panel">
-      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>The Babel Regex tab generates filenames that satisfy your regex, generates deterministic candidate byte objects within your minimum/maximum size constraints, and validates those objects against the expected file type. Literal Babel paths are calculated on demand in a background worker so batch searches remain responsive.</p><p>Format-aware generation currently supports PDF, PNG, ZIP, JSON, text/CSV/Markdown, GGUF, and Safetensors. Candidates up to 64 KiB can be fully materialized and validated; larger supported candidates use an <code>ICFMT1:</code> format-aware virtual recipe and can be reopened in XL for streamed generation.</p><p>Everything executes as JavaScript in this browser tab. GitHub Pages only serves these static files.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
+      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>The Babel Regex tab generates filenames that satisfy your regex, generates deterministic candidate byte objects within your minimum/maximum size constraints, validates the file structure, and separately inspects whether the materialized candidate contains non-trivial content. Search generation and inspection run in a Web Worker; literal Babel paths are calculated only on demand in another worker.</p><p>Strict/content inspection materializes candidates up to 1 MiB each with a bounded accepted-result memory budget. Larger candidate ranges remain available for non-strict virtual-recipe searches, but the UI does not claim that unmaterialized objects contain meaningful content.</p><p>Content-aware generation currently creates populated PDFs, non-uniform PNG images, ZIPs with text payloads, populated JSON/text, and Safetensors with tensor data. Metadata-only GGUF objects are intentionally rejected by the non-trivial-content filter.</p><p>Everything executes as JavaScript in this browser tab. GitHub Pages only serves these static files.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
     </section>
   </main>
 
   <footer>Infinite Corridor · static client-side experiment inspired by p2r3/babel-usb · 4,900 doors at every literal Babel level.</footer>
 </div>
 <div id="toast" class="toast"></div>
-<script type="module" src="./app.js?v=20260812k"></script>
-<script type="module" src="./validated-babel-regex-v2.js?v=20260812k"></script>
-<script type="module" src="./filefinder.js?v=20260812k"></script>
-<script type="module" src="./largefile-v2.js?v=20260812k"></script>
-<script type="module" src="./regex-xl-bridge.js?v=20260812k"></script>
-<script type="module" src="./xl-deeplink.js?v=20260812k"></script>
+<script type="module" src="./app.js?v=20260812m"></script>
+<script type="module" src="./validated-babel-regex-v3.js?v=20260812m"></script>
+<script type="module" src="./filefinder.js?v=20260812m"></script>
+<script type="module" src="./largefile-v2.js?v=20260812m"></script>
+<script type="module" src="./regex-xl-bridge.js?v=20260812m"></script>
+<script type="module" src="./xl-deeplink.js?v=20260812m"></script>
 </body>
 </html>
