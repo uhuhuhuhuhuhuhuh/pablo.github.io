@@ -26,7 +26,7 @@
     <button data-tab="search" class="active">Exact Search</button>
     <button data-tab="explore">Explorer</button>
     <button data-tab="decode">Decode Path</button>
-    <button data-tab="regex">Babel Regex</button>
+    <button data-tab="regex">Babel Discovery</button>
     <button data-tab="xl">XL Objects</button>
     <button data-tab="about">How It Works</button>
   </nav>
@@ -64,14 +64,14 @@
     </section>
 
     <section id="panel-regex" class="panel">
-      <div class="card"><div class="notice">Loading worker-based content-inspected Babel regex search…</div></div>
+      <div class="card"><div class="notice">Loading discovery-only Babel byte-space search…</div></div>
     </section>
 
     <section id="panel-xl" class="panel">
       <div class="card">
         <span class="eyebrow">Infinite Corridor extension</span>
         <h3>Generate very large virtual objects</h3>
-        <p class="help">Literal Babel paths become impractically huge for large files. XL uses compact deterministic <code>ICXL1:</code> recipes for generic data and <code>ICFMT1:</code> recipes for format-aware candidates. Both recipe types can be reopened and streamed to disk without building the entire object in memory.</p>
+        <p class="help">Literal Babel paths become impractically huge for large files. XL uses compact deterministic <code>ICXL1:</code> recipes for generic data and can still reopen older <code>ICFMT1:</code> format-aware recipes. Discovery search itself now uses raw Babel traversal and does not manufacture file structures.</p>
         <div class="notice xl-warning"><strong>Disk warning:</strong> non-zero XL modes write real data. A 1 TiB object can consume about 1 TiB of disk space and take a long time to write. The fast zero-filled option can create a logical-size file without streaming every zero byte, depending on browser and filesystem behavior.</div>
       </div>
 
@@ -96,25 +96,25 @@
 
       <div class="card">
         <span class="eyebrow">Reopen recipe</span><h3>Load an XL or format-aware recipe</h3>
-        <p class="help">Paste either an <code>ICXL1:</code> generic recipe or an <code>ICFMT1:</code> format-aware recipe. ICFMT1 preserves the expected file structure and filename metadata used by Babel Regex.</p>
+        <p class="help">Paste either an <code>ICXL1:</code> generic recipe or a legacy <code>ICFMT1:</code> format-aware recipe.</p>
         <label for="xl-address-input">ICXL1 or ICFMT1 address</label><textarea id="xl-address-input" class="mono" placeholder="ICXL1:1073741824:zero:-"></textarea>
         <div class="button-row"><button id="xl-load-address">Load recipe</button></div>
       </div>
     </section>
 
     <section id="panel-about" class="panel">
-      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>The Babel Regex tab generates filenames that satisfy your regex, generates deterministic candidate byte objects within your minimum/maximum size constraints, validates the file structure, and separately inspects whether the materialized candidate contains non-trivial content. Search generation and inspection run in a Web Worker; literal Babel paths are calculated only on demand in another worker.</p><p>Strict/content inspection materializes candidates up to 1 MiB each with a bounded accepted-result memory budget. Larger candidate ranges remain available for non-strict virtual-recipe searches, but the UI does not claim that unmaterialized objects contain meaningful content.</p><p>Content-aware generation currently creates populated PDFs, non-uniform PNG images, ZIPs with text payloads, populated JSON/text, and Safetensors with tensor data. Metadata-only GGUF objects are intentionally rejected by the non-trivial-content filter.</p><p>Everything executes as JavaScript in this browser tab. GitHub Pages only serves these static files.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
+      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>The Babel Discovery tab does not construct a PDF, PNG, archive, model, or document and then map it into Babel. Instead it deterministically traverses raw byte objects, tests the resulting bytes against the requested format and content conditions, and only returns naturally passing hits. Exact Babel paths are calculated from hit bytes on demand in a separate worker.</p><p>Babel's byte-to-path mapping does not contain arbitrary filename metadata. A filename regex is therefore used as a search label and expected extension, not as proof that a discovered object intrinsically has that filename. The result card states this explicitly.</p><p>Strict/content inspection materializes candidates up to 1 MiB each. For larger objects, raw virtual traversal remains possible when no structural/content claim is requested.</p><p>Because valid structured files are an extraordinarily tiny subset of all byte sequences, discovery-only searches can correctly return zero hits even after millions of attempts. The engine never inserts signatures, page text, pixels, archive entries, or tensor data to force a result.</p><p>Everything executes as JavaScript in this browser tab. GitHub Pages only serves these static files.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
     </section>
   </main>
 
   <footer>Infinite Corridor · static client-side experiment inspired by p2r3/babel-usb · 4,900 doors at every literal Babel level.</footer>
 </div>
 <div id="toast" class="toast"></div>
-<script type="module" src="./app.js?v=20260812m"></script>
-<script type="module" src="./validated-babel-regex-v3.js?v=20260812m"></script>
-<script type="module" src="./filefinder.js?v=20260812m"></script>
-<script type="module" src="./largefile-v2.js?v=20260812m"></script>
-<script type="module" src="./regex-xl-bridge.js?v=20260812m"></script>
-<script type="module" src="./xl-deeplink.js?v=20260812m"></script>
+<script type="module" src="./app.js?v=20260812o"></script>
+<script type="module" src="./validated-babel-regex-v3.js?v=20260812o"></script>
+<script type="module" src="./filefinder.js?v=20260812o"></script>
+<script type="module" src="./largefile-v2.js?v=20260812o"></script>
+<script type="module" src="./regex-xl-bridge.js?v=20260812o"></script>
+<script type="module" src="./xl-deeplink.js?v=20260812o"></script>
 </body>
 </html>
