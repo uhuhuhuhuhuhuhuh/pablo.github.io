@@ -32,7 +32,7 @@ async function loadKnowledgeForSelected(){
       const parts=[];
       if(k.localDictionaryBytes)parts.push(`${formatBytes(k.localDictionaryBytes)} private/local`);
       if(k.publicDictionaryBytes)parts.push(`${formatBytes(k.publicDictionaryBytes)} public baseline`);
-      status.textContent=`IC2.1 found ${formatBytes(k.dictionary.length)} of adaptive dictionary material for this file profile${parts.length?` (${parts.join(' + ')})`:''}.`;
+      status.textContent=`IC2 found ${formatBytes(k.dictionary.length)} of adaptive dictionary material for this file profile${parts.length?` (${parts.join(' + ')})`:''}. Exact public-corpus chunk matching will also be tried if a corpus catalog is installed.`;
     }
   }catch{currentKnowledge=null;}
 }
@@ -41,7 +41,7 @@ function showFile(file){
   selectedFile=file;currentUrl='';resultBox.hidden=true;shareLink.value='';
   $('#file-name').textContent=file.name;$('#file-size').textContent=formatBytes(file.size);$('#file-type').textContent=file.type||inferMime(file.name);$('#file-ext').textContent=extension(file.name);
   dropZone.hidden=true;fileCard.hidden=false;clearButton.hidden=false;createButton.disabled=false;details.hidden=true;
-  status.textContent=`No fixed source-file cap. IC2.1 streams the source, checks adaptive knowledge, and keeps only representations that remain exact and self-contained. The final public token is limited to ${MAX_TOKEN_CHARS.toLocaleString()} characters.`;
+  status.textContent=`No fixed source-file cap. The encoder first checks exact public-corpus chunks. If useful matches exist it can create a corpus-assisted IC2C share; otherwise it falls back to exact self-contained IC2. The final public token is limited to ${MAX_TOKEN_CHARS.toLocaleString()} characters.`;
   resetProgress();loadKnowledgeForSelected();
 }
 function clearFile(){if(busy)return;selectedFile=null;currentKnowledge=null;currentUrl='';fileInput.value='';fileCard.hidden=true;dropZone.hidden=false;clearButton.hidden=true;createButton.disabled=true;resultBox.hidden=true;shareLink.value='';details.hidden=true;status.textContent='Choose a file to begin.';resetProgress();}
@@ -54,21 +54,27 @@ function representationHtml(stats){
   const learned=k.dictionaryUsed
     ? `<div class="knowledge-gain">Adaptive knowledge used · ${k.dictionaryUses.toLocaleString()} dictionary chunks · net descriptor saving ${formatBytes(k.dictionarySavings)}</div>`
     : k.availableDictionaryBytes?`<div class="knowledge-gain muted">Available knowledge was tested but did not beat the self-contained alternatives after dictionary overhead.</div>`:'';
-  return `<div class="rep-grid">${rows}</div>${learned}<div class="rep-foot">${stats.chunks.toLocaleString()} CDC chunks → ${stats.segments.toLocaleString()} manifest segments · ${formatBytes(stats.embeddedBytes)} embedded payload</div>`;
+  const c=stats?.corpus||{};
+  const corpus=c.matchedChunks
+    ? `<div class="knowledge-gain">Public corpus exact matches · ${c.matchedChunks.toLocaleString()} chunks · ${formatBytes(c.matchedBytes)} represented by verified public byte-range references · ${c.distinctSources.toLocaleString()} source object${c.distinctSources===1?'':'s'}</div>`
+    : '';
+  return `<div class="rep-grid">${rows}</div>${corpus}${learned}<div class="rep-foot">${stats.chunks.toLocaleString()} chunks → ${stats.segments.toLocaleString()} manifest segments · ${formatBytes(stats.embeddedBytes)} embedded payload</div>`;
 }
 
 async function createShare(){
   if(!selectedFile||busy)return;
   if(worker)worker.terminate();
   if(!currentKnowledge)await loadKnowledgeForSelected();
-  worker=new Worker('./ic2-worker.js?v=20260812ic21pub',{type:'module'});setBusy(true);resultBox.hidden=true;details.hidden=true;resetProgress();
-  const k=currentKnowledge;
-  status.textContent=k?.dictionary?.length?`Starting IC2.1 analysis with ${formatBytes(k.dictionary.length)} of adaptive dictionary material…`:'Starting IC2.1 analysis…';
+  worker=new Worker('./ic2-worker.js?v=20260812ic2c1',{type:'module'});setBusy(true);resultBox.hidden=true;details.hidden=true;resetProgress();
+  status.textContent='Starting exact public-corpus matching, with self-contained IC2 fallback…';
   worker.onmessage=async(event)=>{
     const m=event.data||{};
     if(m.type==='progress'){
-      if(m.total){progress.value=Math.min(1,m.done/m.total);progressText.textContent=`${Math.round(progress.value*100)}% · ${formatBytes(m.done)} / ${formatBytes(m.total)}`;}
-      status.textContent=m.phase==='pack'?`Packing ${m.segments.toLocaleString()} optimized segments…`:`Analyzing locally · ${m.segments.toLocaleString()} segments so far`;
+      if(m.total&&m.done>=0){progress.value=Math.min(1,m.done/m.total);progressText.textContent=`${Math.round(progress.value*100)}% · ${formatBytes(m.done)} / ${formatBytes(m.total)}`;}
+      if(m.phase==='corpus')status.textContent=`Matching exact public corpus chunks · ${m.segments.toLocaleString()} segments so far…`;
+      else if(m.phase==='fallback')status.textContent='No sufficiently useful corpus-assisted descriptor was produced. Retrying with exact self-contained IC2…';
+      else if(m.phase==='pack')status.textContent=`Packing ${m.segments.toLocaleString()} optimized segments…`;
+      else status.textContent=`Analyzing locally · ${m.segments.toLocaleString()} segments so far`;
       return;
     }
     if(m.type==='error'){currentUrl='';resultBox.hidden=true;status.textContent=m.message;setBusy(false);worker?.terminate();worker=null;return;}
@@ -76,9 +82,12 @@ async function createShare(){
       try{await learnSamples(selectedFile,m.learningSamples||[],{fileBytes:selectedFile.size});}catch(error){console.warn('IC2 knowledge update failed',error);}
       const url=buildShareUrl(m.token,selectedFile.name);currentUrl=url;shareLink.value=url;
       const mode=m.outerMode==='Z'?'Zstandard':m.outerMode==='G'?'gzip':'raw';
-      $('#share-summary').textContent=`IC2.1 · ${url.length.toLocaleString()} URL characters · ${formatBytes(m.packedBytes)} packed manifest · outer ${mode}`;
+      const label=m.format==='IC2C'?'IC2C corpus-assisted':'IC2 self-contained';
+      $('#share-summary').textContent=`${label} · ${url.length.toLocaleString()} URL characters · ${formatBytes(m.packedBytes)} packed manifest · outer ${mode}`;
       details.innerHTML=representationHtml(m.stats);details.hidden=false;resultBox.hidden=false;
-      status.textContent='Ready to share. Useful structural samples were retained privately in this browser, while any repository knowledge pack remains a read-only public baseline.';
+      status.textContent=m.format==='IC2C'
+        ? 'Ready to share. Exact referenced chunks will be fetched from the embedded public source URLs and SHA-256 verified by the receiver.'
+        : 'Ready to share. This share is self-contained; useful structural samples were retained privately in this browser.';
       progress.value=1;progressText.textContent='100%';setBusy(false);worker?.terminate();worker=null;currentKnowledge=null;await refreshKnowledgeStatus();
       resultBox.scrollIntoView({behavior:'smooth',block:'nearest'});return;
     }
@@ -115,4 +124,4 @@ copyButton.addEventListener('click',copyCurrentLink);openButton.addEventListener
 archiveButton.addEventListener('click',trainArchive);
 clearKnowledgeButton.addEventListener('click',async()=>{if(busy)return;clearKnowledgeButton.disabled=true;try{await clearKnowledge();currentKnowledge=null;await refreshKnowledgeStatus('Private browser learning was cleared; the repository public baseline was not changed.');if(selectedFile)await loadKnowledgeForSelected();}finally{clearKnowledgeButton.disabled=false;}});
 refreshKnowledgeStatus();
-if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js?v=20260812ic21pub').catch(()=>{});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js?v=20260812ic2c1').catch(()=>{});
