@@ -1,3 +1,5 @@
+import './public-share-bootstrap.js?v=20260812share1';
+
 function loadXlDeepLink() {
   const raw = window.location.hash.replace(/^#/, '');
   if (!raw) return;
