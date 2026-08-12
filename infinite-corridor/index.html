@@ -26,7 +26,7 @@
     <button data-tab="search" class="active">Exact Search</button>
     <button data-tab="explore">Explorer</button>
     <button data-tab="decode">Decode Path</button>
-    <button data-tab="regex">Regex Generator</button>
+    <button data-tab="regex">Filename Regex</button>
     <button data-tab="xl">XL Objects</button>
     <button data-tab="about">How It Works</button>
   </nav>
@@ -64,8 +64,7 @@
     </section>
 
     <section id="panel-regex" class="panel">
-      <div class="card"><span class="eyebrow">Bounded synthesis</span><h3>Regex match generator</h3><p class="help">Infinity cannot be scanned. Instead, this generates example strings that satisfy a common regex subset and calculates the exact Corridor address of each generated file. Every result also shows its actual byte size and can be downloaded. Supported: literals, groups, <code>|</code>, classes/ranges, <code>\d</code>, <code>\w</code>, <code>\s</code>, <code>.</code>, <code>?</code>, <code>*</code>, <code>+</code>, and <code>{m,n}</code>. Lookarounds, backreferences, and negated classes are intentionally unsupported.</p><div class="grid-2"><div><label for="regex-input">Pattern</label><input id="regex-input" class="mono" type="text" value="user_[0-9]{4}@example\.com"></div><div><label for="regex-count">Examples</label><input id="regex-count" type="number" min="1" max="100" value="10"></div></div><div class="button-row"><button id="regex-generate">Generate Corridor matches</button></div></div>
-      <div id="regex-results"></div>
+      <div class="card"><div class="notice">Loading real filename index search…</div></div>
     </section>
 
     <section id="panel-xl" class="panel">
@@ -73,7 +72,7 @@
         <span class="eyebrow">Infinite Corridor extension</span>
         <h3>Generate very large virtual objects</h3>
         <p class="help">Literal Babel paths become impractically huge for large files. A 1 TiB arbitrary object corresponds to roughly 717.5 billion two-character Corridor levels. XL mode therefore uses a compact deterministic <code>ICXL1:</code> recipe and streams the bytes directly from your browser to a file instead of building the whole object in memory.</p>
-        <div class="notice xl-warning"><strong>Disk warning:</strong> non-zero XL modes write real data. A 1 TiB object can consume about 1 TiB of disk space and take a long time to write. The fast zero-filled option can create a logical-size file without streaming every byte, depending on browser and filesystem behavior.</div>
+        <div class="notice xl-warning"><strong>Disk warning:</strong> non-zero XL modes write real data. A 1 TiB object can consume about 1 TiB of disk space and take a long time to write. The fast zero-filled option can create a logical-size file without streaming every zero byte, depending on browser and filesystem behavior.</div>
       </div>
 
       <div class="card">
@@ -104,17 +103,16 @@
     </section>
 
     <section id="panel-about" class="panel">
-      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>Everything here executes as JavaScript in this browser tab. GitHub Pages only serves these static files. Selected files are read with the browser File API and are not uploaded by this application.</p><p>XL mode is an Infinite Corridor extension for sizes where literal Babel paths are no longer practical. It uses compact deterministic recipes and streamed output; it is not a literal babel-usb directory path.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
+      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>Everything here executes as JavaScript in this browser tab. GitHub Pages only serves these static files. Selected files are read with the browser File API and are not uploaded by this application.</p><p>The Filename Regex tab searches filenames that you explicitly index from a local folder or imported catalog. It does not claim that arbitrary byte sequences have discoverable filenames.</p><p>XL mode is an Infinite Corridor extension for sizes where literal Babel paths are no longer practical. It uses compact deterministic recipes and streamed output; it is not a literal babel-usb directory path.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
     </section>
   </main>
 
   <footer>Infinite Corridor · static client-side experiment inspired by p2r3/babel-usb · 4,900 doors at every literal Babel level.</footer>
 </div>
 <div id="toast" class="toast"></div>
-<script type="module" src="./app.js?v=20260812e"></script>
-<script type="module" src="./enhancements.js?v=20260812e"></script>
-<script type="module" src="./regex-enumeration.js?v=20260812e"></script>
-<script type="module" src="./filefinder.js?v=20260812e"></script>
-<script type="module" src="./largefile.js?v=20260812e"></script>
+<script type="module" src="./app.js?v=20260812f"></script>
+<script type="module" src="./filename-search.js?v=20260812f"></script>
+<script type="module" src="./filefinder.js?v=20260812f"></script>
+<script type="module" src="./largefile.js?v=20260812f"></script>
 </body>
 </html>
