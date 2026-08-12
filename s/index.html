@@ -1,113 +1,16 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#071019">
-  <title>Shared file · The Infinite Corridor</title>
-  <link rel="stylesheet" href="../styles.css?v=20260812share2">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#071019">
+<title>Shared file · The Infinite Corridor</title><link rel="stylesheet" href="../styles.css?v=20260812ic2">
 </head>
-<body>
-  <div class="site-shell">
-    <header class="site-header">
-      <a class="brand" href="../" aria-label="The Infinite Corridor home">
-        <span class="brand-mark">∞</span>
-        <span><strong>THE INFINITE CORRIDOR</strong><small>self-contained file sharing</small></span>
-      </a>
-      <span class="privacy-pill"><i></i> Local reconstruction</span>
-    </header>
-
-    <main class="download-main">
-      <section id="download-card" class="download-card">
-        <div class="file-icon" id="download-ext">FILE</div>
-        <h1 id="download-name">Preparing shared file…</h1>
-        <div id="download-meta" class="meta">Reading the share link locally.</div>
-        <div id="download-status" class="download-status">Verifying and reconstructing the file…</div>
-        <div class="download-actions">
-          <button id="download-button" class="primary-button" type="button" disabled>Download file</button>
-          <a class="home-link" href="../"><button class="secondary-button" type="button">Share your own file</button></a>
-        </div>
-      </section>
-    </main>
-
-    <footer><span>THE INFINITE CORRIDOR</span><span>Shared file · local verification</span></footer>
-  </div>
-
-<script type="module">
-import { decodeIcsToken, formatIcsBytes, inferMime } from '../ics-share-codec.js?v=20260812share2';
-
-const nameEl = document.querySelector('#download-name');
-const metaEl = document.querySelector('#download-meta');
-const statusEl = document.querySelector('#download-status');
-const button = document.querySelector('#download-button');
-const extEl = document.querySelector('#download-ext');
-let bytes = null;
-let filename = null;
-let objectUrl = null;
-
-function extension(name) {
-  const parts = String(name).split('.');
-  return parts.length > 1 ? (parts.pop().replace(/[^a-z0-9]/gi,'').slice(0,5).toUpperCase() || 'FILE') : 'FILE';
-}
-
-function parseShare() {
-  const raw = location.hash.replace(/^#/, '');
-  if (!raw) throw new Error('This link does not contain a shared file.');
-  const slash = raw.lastIndexOf('/');
-  if (slash < 0) throw new Error('This share link is missing its filename.');
-  const token = raw.slice(0, slash);
-  let name;
-  try { name = decodeURIComponent(raw.slice(slash + 1)); }
-  catch { throw new Error('The filename in this share link is malformed.'); }
-  name = name.replace(/[\\/\u0000-\u001f\u007f]/g, '_').trim().slice(0,255) || 'shared-file.bin';
-  return { token, name };
-}
-
-function startDownload() {
-  if (!bytes || !filename) return;
-  if (!objectUrl) objectUrl = URL.createObjectURL(new Blob([bytes], { type: inferMime(filename) }));
-  const a = document.createElement('a');
-  a.href = objectUrl;
-  a.download = filename;
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-async function load() {
-  const parsed = parseShare();
-  filename = parsed.name;
-  document.title = `${filename} · The Infinite Corridor`;
-  nameEl.textContent = filename;
-  extEl.textContent = extension(filename);
-  metaEl.textContent = 'Reconstructing from the self-contained share link.';
-
-  await new Promise(requestAnimationFrame);
-  const decoded = await decodeIcsToken(parsed.token);
-  bytes = decoded.bytes;
-
-  metaEl.textContent = `${formatIcsBytes(bytes.length)} · ${inferMime(filename)}`;
-  statusEl.className = 'download-status success';
-  statusEl.textContent = 'File reconstructed successfully. SHA-256 integrity verified. The random share salt was discarded.';
-  button.disabled = false;
-  button.textContent = `Download ${filename}`;
-  button.addEventListener('click', startDownload);
-
-  setTimeout(startDownload, 350);
-}
-
-load().catch(error => {
-  statusEl.className = 'download-status error';
-  statusEl.textContent = error?.message || String(error);
-  button.disabled = true;
-  button.textContent = 'Download unavailable';
-  metaEl.textContent = 'This share could not be reconstructed.';
-});
-
-addEventListener('beforeunload', () => {
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
-});
-</script>
-</body>
-</html>
+<body><div class="site-shell">
+<header class="site-header"><a class="brand" href="../"><span class="brand-mark">∞</span><span><strong>THE INFINITE CORRIDOR</strong><small>adaptive exact file sharing</small></span></a><span class="privacy-pill"><i></i> Local reconstruction</span></header>
+<main class="download-main"><section id="download-card" class="download-card">
+<div class="file-icon" id="download-ext">FILE</div><h1 id="download-name">Preparing shared file…</h1><div id="download-meta" class="meta">Reading the share descriptor locally.</div>
+<div id="download-status" class="download-status">Verifying the manifest…</div>
+<progress id="download-progress" class="encode-progress" value="0" max="1" hidden></progress><div id="download-progress-text" class="progress-text"></div>
+<div id="download-details" class="representation-details" hidden></div>
+<div class="download-actions"><button id="download-button" class="primary-button" type="button" disabled>Download file</button><a class="home-link" href="../"><button class="secondary-button" type="button">Share your own file</button></a></div>
+</section></main><footer><span>THE INFINITE CORRIDOR</span><span>IC2 · exact local reconstruction</span></footer></div>
+<script type="module" src="../share-receiver.js?v=20260812ic2"></script></body></html>
