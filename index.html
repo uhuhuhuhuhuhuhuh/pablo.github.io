@@ -3,118 +3,79 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#07090d">
-  <meta name="description" content="Infinite Corridor: a browser-native deterministic infinite filesystem inspired by babel-usb.">
-  <title>Infinite Corridor</title>
-  <link rel="stylesheet" href="./styles.css">
-  <link rel="stylesheet" href="./xl.css">
+  <meta name="theme-color" content="#071019">
+  <meta name="description" content="The Infinite Corridor is a self-contained browser file sharing service. Create a share link locally with no upload server or account.">
+  <title>The Infinite Corridor</title>
+  <link rel="stylesheet" href="./styles.css?v=20260812share2">
 </head>
 <body>
-<div class="shell">
-  <header class="topbar">
-    <div class="brand"><div class="mark">∞</div><div><h1>INFINITE CORRIDOR</h1><small>browser-native Babel filesystem</small></div></div>
-    <div class="status">LOCAL ENGINE ONLINE</div>
-  </header>
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="The Infinite Corridor home">
+        <span class="brand-mark">∞</span>
+        <span><strong>THE INFINITE CORRIDOR</strong><small>self-contained file sharing</small></span>
+      </a>
+      <span class="privacy-pill"><i></i> Local-only encoding</span>
+    </header>
 
-  <section class="hero">
-    <div class="kicker">No server. No database. No storage.</div>
-    <h2>Every byte sequence already has an address.</h2>
-    <p>Infinite Corridor recreates the deterministic filesystem idea behind <code>p2r3/babel-usb</code> entirely inside your browser. Exact searches calculate an address instead of scanning data. Opening a Corridor path reconstructs its file locally.</p>
-  </section>
+    <main class="share-main">
+      <section class="intro">
+        <span class="eyebrow">PUBLIC SHARE</span>
+        <h1>Send a file with a link.</h1>
+        <p>Choose a file, create a share link, and send it. The file is encoded in your browser and the recipient reconstructs it from the link.</p>
+      </section>
 
-  <nav class="tabs">
-    <button data-tab="search" class="active">Exact Search</button>
-    <button data-tab="explore">Explorer</button>
-    <button data-tab="decode">Decode Path</button>
-    <button data-tab="regex">Babel Discovery</button>
-    <button data-tab="xl">XL Objects</button>
-    <button data-tab="about">How It Works</button>
-  </nav>
-
-  <main>
-    <section id="panel-search" class="panel active">
-      <div class="grid-3">
-        <div class="card"><span class="eyebrow">Text</span><h3>Find exact text</h3><label for="text-input">UTF-8 text</label><textarea id="text-input" placeholder="Hello world"></textarea><div class="button-row"><button id="text-find">Calculate address</button></div></div>
-        <div class="card"><span class="eyebrow">Bytes</span><h3>Find exact bytes</h3><label for="hex-input">Hexadecimal</label><textarea id="hex-input" class="mono" placeholder="48 65 6c 6c 6f"></textarea><div class="button-row"><button id="hex-find">Calculate address</button></div></div>
-        <div class="card"><span class="eyebrow">Local file</span><h3>Find a file</h3><label for="file-input">Processed locally. Nothing is uploaded.</label><input class="input" id="file-input" type="file"><p id="file-meta" class="muted" style="margin-top:12px">Local file support: up to 256 GiB. Literal paths are generated directly for small files; larger files use a streamed content locator.</p></div>
-      </div>
-      <div id="exact-result" class="card"><div class="notice">Choose text, bytes, or a local file. The engine will calculate its Corridor address or large-file locator.</div></div>
-    </section>
-
-    <section id="panel-explore" class="panel">
-      <div class="card">
-        <div class="explorer-toolbar">
-          <button id="root-dir" class="secondary">Root</button><button id="up-dir" class="secondary">Up</button>
-          <div class="path-wrap"><input id="explorer-path" class="mono" type="text" value="/"><button id="go-path">Go</button></div>
-          <span id="explorer-depth" class="pill">0 levels deep</span>
-        </div>
-        <p class="muted" style="margin:14px 0 0">Each level contains 4,900 generated directories. The view is paginated; no directory listing is downloaded.</p>
-        <div id="directory-grid" class="directory-grid"></div>
-        <div class="pagination"><button id="prev-page" class="secondary">Previous</button><span id="page-label" class="pill"></span><button id="next-page" class="secondary">Next</button></div>
-        <div class="current-file">
-          <div class="file-row"><div><span class="eyebrow">Current directory</span><h3 style="margin:5px 0">file <span id="file-size" class="file-badge"></span></h3></div><button id="download-current">Download</button></div>
-          <div class="preview-grid"><div><label>UTF-8 preview</label><pre id="file-text-preview"></pre></div><div><label>Hex preview</label><pre id="file-hex-preview"></pre></div></div>
-        </div>
-      </div>
-    </section>
-
-    <section id="panel-decode" class="panel">
-      <div class="card"><span class="eyebrow">Address → bytes</span><h3>Decode a Corridor path</h3><label for="decode-path">Babel-compatible path</label><textarea id="decode-path" class="mono" placeholder="/AA/file"></textarea><div class="button-row"><button id="decode-button">Decode locally</button></div></div>
-      <div id="decode-result" class="card"><div class="notice">Paste an address to reconstruct the corresponding bytes in your browser.</div></div>
-    </section>
-
-    <section id="panel-regex" class="panel">
-      <div class="card"><div class="notice">Loading discovery-only Babel byte-space search…</div></div>
-    </section>
-
-    <section id="panel-xl" class="panel">
-      <div class="card">
-        <span class="eyebrow">Infinite Corridor extension</span>
-        <h3>Generate very large virtual objects</h3>
-        <p class="help">Literal Babel paths become impractically huge for large files. XL uses compact deterministic <code>ICXL1:</code> recipes for generic data and can still reopen older <code>ICFMT1:</code> format-aware recipes. Discovery search itself now uses raw Babel traversal and does not manufacture file structures.</p>
-        <div class="notice xl-warning"><strong>Disk warning:</strong> non-zero XL modes write real data. A 1 TiB object can consume about 1 TiB of disk space and take a long time to write. The fast zero-filled option can create a logical-size file without streaming every zero byte, depending on browser and filesystem behavior.</div>
-      </div>
-
-      <div class="card">
-        <div class="xl-grid">
-          <div><label for="xl-size">Size</label><input id="xl-size" type="text" value="1"></div>
-          <div><label for="xl-unit">Unit</label><select id="xl-unit" class="input"><option>B</option><option>KiB</option><option>MiB</option><option selected>GiB</option><option>TiB</option></select></div>
-          <div><label for="xl-mode">Generation mode</label><select id="xl-mode" class="input"><option value="zero">Zero filled</option><option value="counter">00–FF counter pattern</option><option value="text">Repeating UTF-8 text</option><option value="seeded">Seeded deterministic bytes</option></select></div>
-          <div><label for="xl-filename">Output filename</label><input id="xl-filename" type="text" value="corridor-xl.bin"></div>
+      <section class="share-card" aria-labelledby="share-title">
+        <div class="share-card-head">
+          <div><span class="step">01</span><h2 id="share-title">Choose a file</h2></div>
+          <button id="clear-file" class="text-button" type="button" hidden>Clear</button>
         </div>
 
-        <div id="xl-text-options" class="xl-options" hidden><label for="xl-pattern">Repeating text</label><textarea id="xl-pattern">Infinite Corridor
-</textarea></div>
-        <div id="xl-seed-options" class="xl-options" hidden><label for="xl-seed">Deterministic seed</label><input id="xl-seed" type="text" value="infinite-corridor"></div>
-        <div class="xl-options"><label class="xl-check"><input id="xl-fast-zero" type="checkbox" checked><span>For zero-filled objects, use fast logical sizing instead of physically streaming every zero byte.</span></label></div>
+        <input id="file-input" type="file" hidden>
+        <button id="drop-zone" class="drop-zone" type="button">
+          <span class="upload-glyph" aria-hidden="true"><span></span></span>
+          <strong>Drop a file here</strong>
+          <span>or click to browse your computer</span>
+          <small>Nothing is uploaded to a file server.</small>
+        </button>
 
-        <div id="xl-summary" class="notice" style="margin-top:16px"></div>
-        <div class="button-row"><button id="xl-save">Save / stream to disk</button><button id="xl-copy-address" class="secondary">Copy recipe</button><button id="xl-cancel" class="secondary" disabled>Cancel</button></div>
-        <progress id="xl-progress" class="xl-progress" max="100" value="0"></progress>
-        <div id="xl-status" class="xl-status">Ready.</div>
-      </div>
+        <div id="file-card" class="file-card" hidden>
+          <div class="file-icon" id="file-ext">FILE</div>
+          <div class="file-details">
+            <strong id="file-name"></strong>
+            <span><span id="file-size"></span><span class="dot">•</span><span id="file-type"></span></span>
+          </div>
+          <span class="ready-badge">Ready</span>
+        </div>
 
-      <div class="card">
-        <span class="eyebrow">Reopen recipe</span><h3>Load an XL or format-aware recipe</h3>
-        <p class="help">Paste either an <code>ICXL1:</code> generic recipe or a legacy <code>ICFMT1:</code> format-aware recipe.</p>
-        <label for="xl-address-input">ICXL1 or ICFMT1 address</label><textarea id="xl-address-input" class="mono" placeholder="ICXL1:1073741824:zero:-"></textarea>
-        <div class="button-row"><button id="xl-load-address">Load recipe</button></div>
-      </div>
-    </section>
+        <div class="action-area">
+          <button id="create-link" class="primary-button" type="button" disabled>Create share link</button>
+          <div id="status" class="status-line" role="status">Choose a file to begin.</div>
+        </div>
 
-    <section id="panel-about" class="panel">
-      <div class="card help"><span class="eyebrow">Codec</span><h3>Compatible with the original Babel mapping</h3><p>The original project uses a 70-character alphabet and two characters per directory, so every level has <strong>70² = 4,900</strong> possible folders. The path is a bijective base-4,900 representation of a byte sequence represented in bijective base-256.</p><p>For exact search, Infinite Corridor converts your input bytes directly into that address. For browsing, it performs the inverse calculation and reconstructs the current directory's <code>file</code>. An empty file lives at the root.</p><p>The Babel Discovery tab does not construct a PDF, PNG, archive, model, or document and then map it into Babel. Instead it deterministically traverses raw byte objects, tests the resulting bytes against the requested format and content conditions, and only returns naturally passing hits. Exact Babel paths are calculated from hit bytes on demand in a separate worker.</p><p>Babel's byte-to-path mapping does not contain arbitrary filename metadata. A filename regex is therefore used as a search label and expected extension, not as proof that a discovered object intrinsically has that filename. The result card states this explicitly.</p><p>Strict/content inspection materializes candidates up to 1 MiB each. For larger objects, raw virtual traversal remains possible when no structural/content claim is requested.</p><p>Because valid structured files are an extraordinarily tiny subset of all byte sequences, discovery-only searches can correctly return zero hits even after millions of attempts. The engine never inserts signatures, page text, pixels, archive entries, or tensor data to force a result.</p><p>Public Share can hide a self-contained Babel path or reproducible XL recipe behind a short collision-safe pointer while preserving the filename at the end of the public URL. The pointer registry is separate from the Babel mapping and does not make a non-reconstructable hash into a file.</p><p>Everything executes as JavaScript in this browser tab. GitHub Pages only serves these static files; the optional public pointer registry is a separate serverless service.</p><p>The original ESP32 project exposes the same core idea through MTP. Infinite Corridor independently reimplements the mathematical mapping for a browser interface and does not emulate USB or MTP.</p></div>
-    </section>
-  </main>
+        <div id="share-result" class="share-result" hidden>
+          <div class="success-head"><span class="success-check">✓</span><div><strong>Share link ready</strong><span id="share-summary"></span></div></div>
+          <label for="share-link">Public link</label>
+          <div class="link-row"><input id="share-link" type="text" readonly><button id="copy-link" class="copy-button" type="button">Copy</button></div>
+          <div class="result-actions"><button id="open-link" class="secondary-button" type="button">Open link</button><button id="new-link" class="secondary-button" type="button">Generate another link</button></div>
+        </div>
+      </section>
 
-  <footer>Infinite Corridor · static client-side experiment inspired by p2r3/babel-usb · 4,900 doors at every literal Babel level.</footer>
-</div>
-<div id="toast" class="toast"></div>
-<script type="module" src="./app.js?v=20260812share1"></script>
-<script type="module" src="./validated-babel-regex-v3.js?v=20260812share1"></script>
-<script type="module" src="./filefinder.js?v=20260812share1"></script>
-<script type="module" src="./largefile-v2.js?v=20260812share1"></script>
-<script type="module" src="./regex-xl-bridge.js?v=20260812share1"></script>
-<script type="module" src="./xl-deeplink.js?v=20260812share1"></script>
+      <section class="service-info" aria-label="How sharing works">
+        <article><span>01</span><strong>Pick a file</strong><p>The browser reads it locally.</p></article>
+        <article><span>02</span><strong>Copy the link</strong><p>Each link gets fresh random salt.</p></article>
+        <article><span>03</span><strong>Recipient downloads</strong><p>The file is reconstructed and verified locally.</p></article>
+      </section>
+
+      <section class="fine-print">
+        <strong>Self-contained links</strong>
+        <p>The link carries the reversible file data itself. This works best for small files and compressible content. Already-compressed media can produce very long links, and the browser will reject a link that exceeds the service safety limit. The random salt changes the appearance of repeated links but is not encryption.</p>
+      </section>
+    </main>
+
+    <footer><span>THE INFINITE CORRIDOR</span><span>No account · no registry · no file server</span></footer>
+  </div>
+
+  <script type="module" src="./public-share.js?v=20260812share2"></script>
 </body>
 </html>

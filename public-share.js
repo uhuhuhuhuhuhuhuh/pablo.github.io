@@ -1,139 +1,162 @@
-import { createIcsToken, formatIcsBytes } from './ics-share-codec.js?v=20260812ics1';
-import { pathToBytes } from './codec.js?v=20260812ics1';
+import { createIcsToken, formatIcsBytes, inferMime } from './ics-share-codec.js?v=20260812share2';
 
-const $ = s => document.querySelector(s);
 const MAX_TOKEN_CHARS = 1_500_000;
-const MAX_LITERAL_PATH_CHARS = 2_000_000;
+const MAX_INPUT_BYTES = 32 * 1024 * 1024;
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, c => ({
-    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;'
-  }[c]));
+const fileInput = document.querySelector('#file-input');
+const dropZone = document.querySelector('#drop-zone');
+const fileCard = document.querySelector('#file-card');
+const clearButton = document.querySelector('#clear-file');
+const createButton = document.querySelector('#create-link');
+const status = document.querySelector('#status');
+const resultBox = document.querySelector('#share-result');
+const shareLink = document.querySelector('#share-link');
+const copyButton = document.querySelector('#copy-link');
+const openButton = document.querySelector('#open-link');
+const newLinkButton = document.querySelector('#new-link');
+
+let selectedFile = null;
+let currentUrl = '';
+let busy = false;
+
+function cleanFilename(name) {
+  const cleaned = String(name || 'shared-file.bin').replace(/[\\/\u0000-\u001f\u007f]/g, '_').trim();
+  return (cleaned || 'shared-file.bin').slice(0, 255);
 }
 
-function cleanFilename(value) {
-  const name = String(value || '').replace(/[\\/\u0000-\u001f\u007f]/g, '_').trim();
-  if (!name) throw new Error('A filename is required.');
-  return name.slice(0, 255);
+function extension(name) {
+  const pieces = String(name).split('.');
+  if (pieces.length < 2) return 'FILE';
+  return pieces.pop().replace(/[^a-z0-9]/gi, '').slice(0, 5).toUpperCase() || 'FILE';
 }
 
 function buildShareUrl(token, filename) {
   if (token.length > MAX_TOKEN_CHARS) {
-    throw new Error(`This self-contained token is ${token.length.toLocaleString()} characters, above the ${MAX_TOKEN_CHARS.toLocaleString()} character browser-safety limit. The file does not compress enough for a practical self-contained URL.`);
+    throw new Error(`The encoded link would be ${token.length.toLocaleString()} characters, above the ${MAX_TOKEN_CHARS.toLocaleString()} character safety limit. Try a smaller or more compressible file.`);
   }
   const url = new URL('./s/', location.href);
   url.hash = `${token}/${encodeURIComponent(cleanFilename(filename))}`;
   return url.toString();
 }
 
-function renderResult(target, result, filename) {
-  const compression = result.mode === 'G'
-    ? `gzip compressed ${formatIcsBytes(result.originalBytes)} → ${formatIcsBytes(result.packedBytes)}`
-    : `raw reversible payload ${formatIcsBytes(result.originalBytes)}`;
-
-  target.innerHTML = `<div class="notice">
-    <strong>Self-contained share ready</strong><br>
-    <a class="mono" href="${escapeHtml(result.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(result.url.length > 260 ? result.url.slice(0, 220) + '…/' + filename : result.url)}</a>
-    <div class="muted" style="margin-top:8px">${escapeHtml(compression)} · ${result.url.length.toLocaleString()} URL characters · random salt ${escapeHtml(result.salt.slice(0, 10))}… is discarded by the receiver.</div>
-    <div class="button-row"><button class="secondary share-copy">Copy share link</button><button class="secondary share-open">Open share</button></div>
-  </div>`;
-
-  target.querySelector('.share-copy').onclick = async event => {
-    await navigator.clipboard.writeText(result.url);
-    const button = event.currentTarget, old = button.textContent;
-    button.textContent = 'Copied';
-    setTimeout(() => button.textContent = old, 900);
-  };
-  target.querySelector('.share-open').onclick = () => window.open(result.url, '_blank', 'noopener,noreferrer');
+function setBusy(value) {
+  busy = value;
+  createButton.disabled = value || !selectedFile;
+  clearButton.disabled = value;
+  dropZone.disabled = value;
+  createButton.textContent = value ? 'Creating link…' : 'Create share link';
 }
 
-async function encodeBytes(bytes, filename, status, target) {
-  status.textContent = `Encoding ${formatIcsBytes(bytes.length)} locally…`;
-  const encoded = await createIcsToken(bytes);
-  const url = buildShareUrl(encoded.token, filename);
-  renderResult(target, { ...encoded, url }, filename);
-  status.textContent = 'Ready. No file bytes or manifest were uploaded anywhere.';
+function showFile(file) {
+  if (!file) return;
+  selectedFile = file;
+  currentUrl = '';
+  resultBox.hidden = true;
+  shareLink.value = '';
+
+  document.querySelector('#file-name').textContent = file.name;
+  document.querySelector('#file-size').textContent = formatIcsBytes(file.size);
+  document.querySelector('#file-type').textContent = file.type || inferMime(file.name);
+  document.querySelector('#file-ext').textContent = extension(file.name);
+
+  dropZone.hidden = true;
+  fileCard.hidden = false;
+  clearButton.hidden = false;
+  createButton.disabled = false;
+  status.textContent = file.size > MAX_INPUT_BYTES
+    ? `This file is ${formatIcsBytes(file.size)}. The current browser safety limit is ${formatIcsBytes(MAX_INPUT_BYTES)}.`
+    : 'Ready to create a self-contained share link.';
 }
 
-async function shareLocalFile() {
-  const file = $('#share-local-file').files?.[0];
-  const status = $('#share-local-status');
-  const result = $('#share-local-result');
-  result.innerHTML = '';
-  if (!file) throw new Error('Choose a local file first.');
-
-  status.textContent = `Reading ${file.name} locally…`;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  await encodeBytes(bytes, file.name, status, result);
+function clearFile() {
+  if (busy) return;
+  selectedFile = null;
+  currentUrl = '';
+  fileInput.value = '';
+  fileCard.hidden = true;
+  dropZone.hidden = false;
+  clearButton.hidden = true;
+  createButton.disabled = true;
+  resultBox.hidden = true;
+  shareLink.value = '';
+  status.textContent = 'Choose a file to begin.';
 }
 
-async function shareLiteralPath() {
-  const path = $('#share-path').value.trim();
-  const filename = cleanFilename($('#share-path-name').value);
-  const status = $('#share-path-status');
-  const result = $('#share-path-result');
-  result.innerHTML = '';
+async function createShare() {
+  if (!selectedFile || busy) return;
+  if (selectedFile.size > MAX_INPUT_BYTES) {
+    status.textContent = `This browser build caps local share encoding at ${formatIcsBytes(MAX_INPUT_BYTES)} to avoid freezing the tab.`;
+    return;
+  }
 
-  if (!path) throw new Error('Paste a literal Babel /.../file path first.');
-  if (!path.startsWith('/') || !path.endsWith('/file')) throw new Error('This input is not a literal Babel /.../file path.');
-  if (path.length > MAX_LITERAL_PATH_CHARS) throw new Error('That literal Babel path is too large to expand safely in this browser tab.');
+  setBusy(true);
+  resultBox.hidden = true;
+  status.textContent = `Reading ${selectedFile.name} locally…`;
 
-  status.textContent = 'Reconstructing the exact bytes represented by the Babel path…';
-  await new Promise(requestAnimationFrame);
-  const bytes = pathToBytes(path);
-  await encodeBytes(bytes, filename, status, result);
+  try {
+    const bytes = new Uint8Array(await selectedFile.arrayBuffer());
+    status.textContent = `Packing ${formatIcsBytes(bytes.length)} into a self-contained link…`;
+    await new Promise(requestAnimationFrame);
+
+    const encoded = await createIcsToken(bytes);
+    const url = buildShareUrl(encoded.token, selectedFile.name);
+    currentUrl = url;
+    shareLink.value = url;
+
+    const modeText = encoded.mode === 'G'
+      ? `${formatIcsBytes(encoded.originalBytes)} compressed to ${formatIcsBytes(encoded.packedBytes)}`
+      : `${formatIcsBytes(encoded.originalBytes)} stored as a raw reversible payload`;
+
+    document.querySelector('#share-summary').textContent = `${modeText} · ${url.length.toLocaleString()} URL characters`;
+    resultBox.hidden = false;
+    status.textContent = 'Ready to share. Creating another link for the same file will use a new random salt.';
+    resultBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (error) {
+    currentUrl = '';
+    resultBox.hidden = true;
+    status.textContent = error?.message || String(error);
+  } finally {
+    setBusy(false);
+  }
 }
 
-function installUi() {
-  const panel = $('#panel-share');
-  if (!panel) return;
-
-  panel.innerHTML = `<div class="card">
-    <span class="eyebrow">No registry · no server · no upload</span>
-    <h3>Self-Contained Corridor Share</h3>
-    <p class="help">A share URL carries the reversible file information inside its fragment. The browser optionally gzip-compresses the bytes, adds an integrity hash, and adds a fresh random salt so repeated shares of the same file produce different-looking URLs. The receiver throws the salt away, verifies the hash, reconstructs the original bytes locally, and downloads using the filename at the end of the URL.</p>
-    <div class="notice"><strong>Format:</strong> <code>/s/#ICS1.&lt;throwaway-salt&gt;.&lt;mode&gt;.&lt;sha256&gt;.&lt;payload&gt;/filename.ext</code><br>The fragment after <code>#</code> is not sent to GitHub Pages. There is no short-ID collision database because the token itself contains the reversible information.</div>
-  </div>
-
-  <div class="grid-2">
-    <div class="card">
-      <span class="eyebrow">Local file → ICS1 URL</span>
-      <h3>Share a local file</h3>
-      <p class="help">The file is read and encoded entirely in this browser. Create the link again and you will get a different random salt but the receiver will reconstruct the same bytes.</p>
-      <input id="share-local-file" class="input" type="file">
-      <div class="button-row"><button id="share-local-create">Create self-contained link</button></div>
-      <div id="share-local-status" class="muted" style="margin-top:10px">Ready.</div>
-      <div id="share-local-result" style="margin-top:12px"></div>
-    </div>
-
-    <div class="card">
-      <span class="eyebrow">Existing Babel path → compact share</span>
-      <h3>Share a literal Babel object</h3>
-      <label for="share-path-name">Download filename</label>
-      <input id="share-path-name" type="text" placeholder="readme.txt">
-      <label for="share-path">Literal Babel path</label>
-      <textarea id="share-path" class="mono" placeholder="/AA/.../file"></textarea>
-      <div class="button-row"><button id="share-path-create">Create self-contained link</button></div>
-      <div id="share-path-status" class="muted" style="margin-top:10px">Ready.</div>
-      <div id="share-path-result" style="margin-top:12px"></div>
-    </div>
-  </div>
-
-  <div class="card help">
-    <h3>What the salt does</h3>
-    <p>The salt is deliberately not part of the file reconstruction. It is random URL noise only. Two shares of identical bytes therefore normally have different URLs, while removing the salt during decode yields the same original file. It is not encryption and does not make a public share private.</p>
-    <p>Self-contained sharing cannot turn an arbitrary multi-gigabyte incompressible file into a tiny URL. The current browser-safety cap is ${MAX_TOKEN_CHARS.toLocaleString()} token characters. Compressible text and structured data can fit much more efficiently than already-compressed video, ZIP, PNG, JPEG, and similar formats.</p>
-  </div>`;
-
-  $('#share-local-create').onclick = () => shareLocalFile().catch(error => {
-    $('#share-local-status').textContent = error.message;
-    $('#share-local-result').innerHTML = '';
-  });
-
-  $('#share-path-create').onclick = () => shareLiteralPath().catch(error => {
-    $('#share-path-status').textContent = error.message;
-    $('#share-path-result').innerHTML = '';
-  });
+async function copyCurrentLink() {
+  if (!currentUrl) return;
+  try {
+    await navigator.clipboard.writeText(currentUrl);
+  } catch {
+    shareLink.focus();
+    shareLink.select();
+    document.execCommand('copy');
+  }
+  const old = copyButton.textContent;
+  copyButton.textContent = 'Copied';
+  setTimeout(() => { copyButton.textContent = old; }, 1000);
 }
 
-installUi();
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', event => {
+  event.preventDefault();
+  if (!busy) dropZone.classList.add('dragging');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragging'));
+dropZone.addEventListener('drop', event => {
+  event.preventDefault();
+  dropZone.classList.remove('dragging');
+  if (busy) return;
+  const file = event.dataTransfer?.files?.[0];
+  if (file) showFile(file);
+});
+
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files?.[0];
+  if (file) showFile(file);
+});
+
+clearButton.addEventListener('click', clearFile);
+createButton.addEventListener('click', createShare);
+copyButton.addEventListener('click', copyCurrentLink);
+openButton.addEventListener('click', () => {
+  if (currentUrl) window.open(currentUrl, '_blank', 'noopener,noreferrer');
+});
+newLinkButton.addEventListener('click', createShare);

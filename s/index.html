@@ -3,53 +3,72 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#07090d">
-  <title>Infinite Corridor Share</title>
-  <link rel="stylesheet" href="../styles.css">
-  <link rel="stylesheet" href="../xl.css">
+  <meta name="theme-color" content="#071019">
+  <title>Shared file · The Infinite Corridor</title>
+  <link rel="stylesheet" href="../styles.css?v=20260812share2">
 </head>
 <body>
-<div class="shell">
-  <header class="topbar">
-    <div class="brand"><div class="mark">∞</div><div><h1>INFINITE CORRIDOR</h1><small>self-contained share resolver</small></div></div>
-    <div class="status">ICS1 LOCAL DECODER</div>
-  </header>
-  <main>
-    <section class="panel active">
-      <div id="share-resolver" class="card"><div class="notice">Reading self-contained share…</div></div>
-    </section>
-  </main>
-  <footer>Infinite Corridor · no registry · no file server · local reconstruction</footer>
-</div>
-<script type="module">
-import { decodeIcsToken, formatIcsBytes, inferMime } from '../ics-share-codec.js?v=20260812ics1';
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="brand" href="../" aria-label="The Infinite Corridor home">
+        <span class="brand-mark">∞</span>
+        <span><strong>THE INFINITE CORRIDOR</strong><small>self-contained file sharing</small></span>
+      </a>
+      <span class="privacy-pill"><i></i> Local reconstruction</span>
+    </header>
 
-const target = document.querySelector('#share-resolver');
-const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+    <main class="download-main">
+      <section id="download-card" class="download-card">
+        <div class="file-icon" id="download-ext">FILE</div>
+        <h1 id="download-name">Preparing shared file…</h1>
+        <div id="download-meta" class="meta">Reading the share link locally.</div>
+        <div id="download-status" class="download-status">Verifying and reconstructing the file…</div>
+        <div class="download-actions">
+          <button id="download-button" class="primary-button" type="button" disabled>Download file</button>
+          <a class="home-link" href="../"><button class="secondary-button" type="button">Share your own file</button></a>
+        </div>
+      </section>
+    </main>
+
+    <footer><span>THE INFINITE CORRIDOR</span><span>Shared file · local verification</span></footer>
+  </div>
+
+<script type="module">
+import { decodeIcsToken, formatIcsBytes, inferMime } from '../ics-share-codec.js?v=20260812share2';
+
+const nameEl = document.querySelector('#download-name');
+const metaEl = document.querySelector('#download-meta');
+const statusEl = document.querySelector('#download-status');
+const button = document.querySelector('#download-button');
+const extEl = document.querySelector('#download-ext');
+let bytes = null;
+let filename = null;
 let objectUrl = null;
-let decodedBytes = null;
-let decodedFilename = null;
+
+function extension(name) {
+  const parts = String(name).split('.');
+  return parts.length > 1 ? (parts.pop().replace(/[^a-z0-9]/gi,'').slice(0,5).toUpperCase() || 'FILE') : 'FILE';
+}
 
 function parseShare() {
   const raw = location.hash.replace(/^#/, '');
-  if (!raw) throw new Error('This URL does not contain an ICS1 share token.');
+  if (!raw) throw new Error('This link does not contain a shared file.');
   const slash = raw.lastIndexOf('/');
-  if (slash < 0) throw new Error('This share URL is missing its filename.');
+  if (slash < 0) throw new Error('This share link is missing its filename.');
   const token = raw.slice(0, slash);
-  let filename;
-  try { filename = decodeURIComponent(raw.slice(slash + 1)); }
-  catch { throw new Error('The filename at the end of this share URL is malformed.'); }
-  filename = filename.replace(/[\\/\u0000-\u001f\u007f]/g, '_').trim().slice(0, 255);
-  if (!filename) filename = 'corridor-share.bin';
-  return { token, filename };
+  let name;
+  try { name = decodeURIComponent(raw.slice(slash + 1)); }
+  catch { throw new Error('The filename in this share link is malformed.'); }
+  name = name.replace(/[\\/\u0000-\u001f\u007f]/g, '_').trim().slice(0,255) || 'shared-file.bin';
+  return { token, name };
 }
 
 function startDownload() {
-  if (!decodedBytes || !decodedFilename) return;
-  if (!objectUrl) objectUrl = URL.createObjectURL(new Blob([decodedBytes], { type: inferMime(decodedFilename) }));
+  if (!bytes || !filename) return;
+  if (!objectUrl) objectUrl = URL.createObjectURL(new Blob([bytes], { type: inferMime(filename) }));
   const a = document.createElement('a');
   a.href = objectUrl;
-  a.download = decodedFilename;
+  a.download = filename;
   a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
@@ -57,28 +76,33 @@ function startDownload() {
 }
 
 async function load() {
-  const { token, filename } = parseShare();
-  document.title = `${filename} · Infinite Corridor`;
-  target.innerHTML = `<span class="eyebrow">ICS1 self-contained object</span><h3>${esc(filename)}</h3><div id="decode-status" class="notice" style="margin-top:16px">Decoding the URL payload locally…</div>`;
+  const parsed = parseShare();
+  filename = parsed.name;
+  document.title = `${filename} · The Infinite Corridor`;
+  nameEl.textContent = filename;
+  extEl.textContent = extension(filename);
+  metaEl.textContent = 'Reconstructing from the self-contained share link.';
+
   await new Promise(requestAnimationFrame);
+  const decoded = await decodeIcsToken(parsed.token);
+  bytes = decoded.bytes;
 
-  const result = await decodeIcsToken(token);
-  decodedBytes = result.bytes;
-  decodedFilename = filename;
+  metaEl.textContent = `${formatIcsBytes(bytes.length)} · ${inferMime(filename)}`;
+  statusEl.className = 'download-status success';
+  statusEl.textContent = 'File reconstructed successfully. SHA-256 integrity verified. The random share salt was discarded.';
+  button.disabled = false;
+  button.textContent = `Download ${filename}`;
+  button.addEventListener('click', startDownload);
 
-  const mode = result.mode === 'G' ? 'gzip-compressed payload' : 'raw reversible payload';
-  target.innerHTML = `<span class="eyebrow">ICS1 self-contained object</span><h3>${esc(filename)}</h3>
-    <div class="regex-meta"><span>${esc(formatIcsBytes(result.bytes.length))}</span><span>${esc(mode)}</span><span>SHA-256 verified</span><span>random salt discarded</span></div>
-    <div class="notice" style="margin-top:16px">The original bytes were reconstructed entirely from this URL. GitHub Pages did not receive the fragment payload and no pointer database was queried.</div>
-    <div class="button-row"><button id="download-share">Download ${esc(filename)}</button><a href="../"><button class="secondary">Open Infinite Corridor</button></a></div>
-    <div class="muted" style="margin-top:10px">Automatic download will be attempted once. If your browser blocks it, use the Download button.</div>`;
-
-  document.querySelector('#download-share').onclick = startDownload;
-  setTimeout(startDownload, 250);
+  setTimeout(startDownload, 350);
 }
 
 load().catch(error => {
-  target.innerHTML = `<div class="notice error"><strong>Could not reconstruct this share.</strong><br>${esc(error.message || error)}</div><div class="button-row"><a href="../"><button class="secondary">Open Infinite Corridor</button></a></div>`;
+  statusEl.className = 'download-status error';
+  statusEl.textContent = error?.message || String(error);
+  button.disabled = true;
+  button.textContent = 'Download unavailable';
+  metaEl.textContent = 'This share could not be reconstructed.';
 });
 
 addEventListener('beforeunload', () => {
