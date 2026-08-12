@@ -1,7 +1,8 @@
-import { createIcsToken, formatIcsBytes, inferMime } from './ics-share-codec.js?v=20260812share2';
+import { createIcsToken, formatIcsBytes, inferMime } from './ics-share-codec.js?v=20260812share3';
 
 const MAX_TOKEN_CHARS = 1_500_000;
-const MAX_INPUT_BYTES = 32 * 1024 * 1024;
+const TOKEN_OVERHEAD_CHARS = 80;
+const APPROX_RAW_PAYLOAD_BYTES = Math.floor((MAX_TOKEN_CHARS - TOKEN_OVERHEAD_CHARS) * 3 / 4);
 
 const fileInput = document.querySelector('#file-input');
 const dropZone = document.querySelector('#drop-zone');
@@ -32,11 +33,21 @@ function extension(name) {
 
 function buildShareUrl(token, filename) {
   if (token.length > MAX_TOKEN_CHARS) {
-    throw new Error(`The encoded link would be ${token.length.toLocaleString()} characters, above the ${MAX_TOKEN_CHARS.toLocaleString()} character safety limit. Try a smaller or more compressible file.`);
+    throw new Error(`The encoded link would be ${token.length.toLocaleString()} characters, above the ${MAX_TOKEN_CHARS.toLocaleString()} character share-link safety limit. This file did not compress enough to fit in a self-contained URL.`);
   }
   const url = new URL('./s/', location.href);
   url.hash = `${token}/${encodeURIComponent(cleanFilename(filename))}`;
   return url.toString();
+}
+
+function compressionRequirement(fileSize) {
+  if (fileSize <= APPROX_RAW_PAYLOAD_BYTES) {
+    return `This file can fit even without compression. Final links are limited to ${MAX_TOKEN_CHARS.toLocaleString()} token characters.`;
+  }
+
+  const maxRatio = APPROX_RAW_PAYLOAD_BYTES / fileSize;
+  const reduction = Math.max(0, (1 - maxRatio) * 100);
+  return `No fixed source-file cap. To fit the ${MAX_TOKEN_CHARS.toLocaleString()}-character link limit, this file needs to compress by about ${reduction.toFixed(reduction >= 99 ? 2 : 1)}% or better.`;
 }
 
 function setBusy(value) {
@@ -63,9 +74,7 @@ function showFile(file) {
   fileCard.hidden = false;
   clearButton.hidden = false;
   createButton.disabled = false;
-  status.textContent = file.size > MAX_INPUT_BYTES
-    ? `This file is ${formatIcsBytes(file.size)}. The current browser safety limit is ${formatIcsBytes(MAX_INPUT_BYTES)}.`
-    : 'Ready to create a self-contained share link.';
+  status.textContent = compressionRequirement(file.size);
 }
 
 function clearFile() {
@@ -79,23 +88,19 @@ function clearFile() {
   createButton.disabled = true;
   resultBox.hidden = true;
   shareLink.value = '';
-  status.textContent = 'Choose a file to begin.';
+  status.textContent = `Choose a file to begin. There is no fixed source-file cap; the final token must stay under ${MAX_TOKEN_CHARS.toLocaleString()} characters.`;
 }
 
 async function createShare() {
   if (!selectedFile || busy) return;
-  if (selectedFile.size > MAX_INPUT_BYTES) {
-    status.textContent = `This browser build caps local share encoding at ${formatIcsBytes(MAX_INPUT_BYTES)} to avoid freezing the tab.`;
-    return;
-  }
 
   setBusy(true);
   resultBox.hidden = true;
-  status.textContent = `Reading ${selectedFile.name} locally…`;
+  status.textContent = `Reading ${selectedFile.name} locally… Large files can use substantial browser memory.`;
 
   try {
     const bytes = new Uint8Array(await selectedFile.arrayBuffer());
-    status.textContent = `Packing ${formatIcsBytes(bytes.length)} into a self-contained link…`;
+    status.textContent = `Compressing and packing ${formatIcsBytes(bytes.length)} into a self-contained link…`;
     await new Promise(requestAnimationFrame);
 
     const encoded = await createIcsToken(bytes);
