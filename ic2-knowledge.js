@@ -7,6 +7,10 @@ const PROFILE_STORE = 'profiles';
 const MAX_PROFILE_SAMPLES = 96;
 const SAMPLE_BYTES = 2048;
 const DICTIONARY_BYTES = 16 * 1024;
+const LOCAL_DICTIONARY_TARGET = 12 * 1024;
+const PUBLIC_PACK_PATH = './ic2-public-knowledge.json';
+const PUBLIC_PACK_FORMAT = 'IC2_PUBLIC_KNOWLEDGE_V1';
+let publicPackPromise = null;
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -27,6 +31,44 @@ function openDb() {
 function reqValue(req) { return new Promise((resolve,reject)=>{ req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error); }); }
 function txDone(tx) { return new Promise((resolve,reject)=>{ tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error||new Error('IndexedDB transaction aborted.')); }); }
 
+function decodeBase64Url(value) {
+  const text=String(value||'');
+  if(!/^[A-Za-z0-9_-]*$/.test(text)) return new Uint8Array();
+  try {
+    const padded=text.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-text.length%4)%4);
+    const binary=atob(padded), out=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)out[i]=binary.charCodeAt(i);
+    return out;
+  } catch { return new Uint8Array(); }
+}
+
+async function getPublicPack() {
+  if (!publicPackPromise) {
+    publicPackPromise=(async()=>{
+      try {
+        const response=await fetch(PUBLIC_PACK_PATH,{cache:'no-store'});
+        if(!response.ok) return null;
+        const pack=await response.json();
+        if(pack?.format!==PUBLIC_PACK_FORMAT || !pack?.profiles || typeof pack.profiles!=='object') return null;
+        return pack;
+      } catch { return null; }
+    })();
+  }
+  return publicPackPromise;
+}
+
+async function getPublicProfile(profile) {
+  const pack=await getPublicPack(), row=pack?.profiles?.[profile];
+  if(!row) return {dictionary:new Uint8Array(),files:0,bytes:0,samples:0};
+  const decoded=decodeBase64Url(row.dictionary_b64url);
+  return {
+    dictionary:decoded.slice(0,DICTIONARY_BYTES),
+    files:Number(row.files||0),
+    bytes:Number(row.observed_bytes||0),
+    samples:Number(row.sample_count||0)
+  };
+}
+
 export function knowledgeProfile(fileOrName, mime='') {
   const name = typeof fileOrName === 'string' ? fileOrName : (fileOrName?.name || '');
   const type = mime || (typeof fileOrName === 'object' ? fileOrName?.type : '') || '';
@@ -43,26 +85,45 @@ async function getProfileSamples(db, profile) {
   return rows || [];
 }
 
-export async function getKnowledgeSnapshot(file) {
-  if (!('indexedDB' in globalThis)) return { profile:knowledgeProfile(file), dictionary:new Uint8Array(), sampleCount:0, observedFiles:0, observedBytes:0 };
-  const profile = knowledgeProfile(file);
-  const db = await openDb();
-  const samples = await getProfileSamples(db, profile);
+function buildMergedDictionary(samples, publicDictionary) {
   samples.sort((a,b)=>(b.hits||1)-(a.hits||1) || (b.lastSeen||0)-(a.lastSeen||0));
-  const chosen=[]; let total=0;
-  for (const row of samples) {
-    const data = new Uint8Array(row.data);
-    if (!data.length) continue;
-    const take = Math.min(data.length, DICTIONARY_BYTES-total);
-    if (take<=0) break;
-    chosen.push(data.subarray(0,take)); total += take;
+  const publicBytes=publicDictionary?.length||0;
+  const localLimit=publicBytes ? LOCAL_DICTIONARY_TARGET : DICTIONARY_BYTES;
+  const parts=[]; let localBytes=0;
+  for(const row of samples) {
+    const data=new Uint8Array(row.data);
+    if(!data.length || localBytes>=localLimit) continue;
+    const take=Math.min(data.length,localLimit-localBytes);
+    parts.push(data.subarray(0,take)); localBytes+=take;
   }
-  const dictionary = new Uint8Array(total); let at=0;
-  for (const part of chosen) { dictionary.set(part,at); at+=part.length; }
-  const tx = db.transaction(PROFILE_STORE,'readonly');
-  const p = await reqValue(tx.objectStore(PROFILE_STORE).get(profile));
+  const remaining=DICTIONARY_BYTES-localBytes;
+  const publicTake=Math.min(remaining,publicBytes);
+  if(publicTake>0) parts.push(publicDictionary.subarray(0,publicTake));
+  const dictionary=new Uint8Array(localBytes+publicTake); let at=0;
+  for(const part of parts){dictionary.set(part,at);at+=part.length;}
+  return {dictionary,localBytes,publicBytes:publicTake};
+}
+
+export async function getKnowledgeSnapshot(file) {
+  const profile=knowledgeProfile(file), pub=await getPublicProfile(profile);
+  if (!('indexedDB' in globalThis)) {
+    return {
+      profile,dictionary:pub.dictionary,sampleCount:0,observedFiles:0,observedBytes:0,
+      localDictionaryBytes:0,publicDictionaryBytes:pub.dictionary.length,
+      publicObservedFiles:pub.files,publicObservedBytes:pub.bytes,publicSampleCount:pub.samples
+    };
+  }
+  const db=await openDb();
+  const samples=await getProfileSamples(db,profile);
+  const merged=buildMergedDictionary(samples,pub.dictionary);
+  const tx=db.transaction(PROFILE_STORE,'readonly');
+  const p=await reqValue(tx.objectStore(PROFILE_STORE).get(profile));
   db.close();
-  return { profile, dictionary, sampleCount:samples.length, observedFiles:p?.files||0, observedBytes:p?.bytes||0 };
+  return {
+    profile,dictionary:merged.dictionary,sampleCount:samples.length,observedFiles:p?.files||0,observedBytes:p?.bytes||0,
+    localDictionaryBytes:merged.localBytes,publicDictionaryBytes:merged.publicBytes,
+    publicObservedFiles:pub.files,publicObservedBytes:pub.bytes,publicSampleCount:pub.samples
+  };
 }
 
 export async function learnSamples(file, samples=[], metrics={}) {
@@ -102,12 +163,21 @@ export async function clearKnowledge() {
 }
 
 export async function knowledgeSummary() {
-  if (!('indexedDB' in globalThis)) return { profiles:0,samples:0,files:0,bytes:0 };
+  const pack=await getPublicPack();
+  const publicStats={
+    publicProfiles:Object.keys(pack?.profiles||{}).length,
+    publicFiles:Number(pack?.stats?.files||0),
+    publicBytes:Number(pack?.stats?.observed_bytes||0)
+  };
+  if (!('indexedDB' in globalThis)) return { profiles:0,samples:0,files:0,bytes:0,...publicStats };
   const db=await openDb();
   const tx=db.transaction([SAMPLE_STORE,PROFILE_STORE],'readonly');
   const [samples,profiles]=await Promise.all([reqValue(tx.objectStore(SAMPLE_STORE).count()),reqValue(tx.objectStore(PROFILE_STORE).getAll())]);
   db.close();
-  return { profiles:profiles.length, samples, files:profiles.reduce((a,p)=>a+(p.files||0),0), bytes:profiles.reduce((a,p)=>a+(p.bytes||0),0) };
+  return {
+    profiles:profiles.length, samples, files:profiles.reduce((a,p)=>a+(p.files||0),0), bytes:profiles.reduce((a,p)=>a+(p.bytes||0),0),
+    ...publicStats
+  };
 }
 
 export async function trainBlob(blob, {name='training.txt', type='text/plain'}={}) {
