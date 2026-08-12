@@ -113,7 +113,7 @@ function renderExplorer() {
   $('#prev-page').disabled = explorerPage === 0;
   $('#next-page').disabled = end >= DIRECTORY_OBJECTS;
   document.querySelectorAll('.dir').forEach(btn => btn.onclick = () => {
-    explorerSegments.push(directoryName(Number(btn.dataset.dir));
+    explorerSegments.push(directoryName(Number(btn.dataset.dir)));
     explorerPage = 0;
     renderExplorer();
     updateHash();
