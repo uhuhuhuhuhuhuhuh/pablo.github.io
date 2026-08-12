@@ -5,10 +5,24 @@ function activateShare(tab, panel) {
   panel.classList.add('active');
 }
 
+function patchAboutCopy() {
+  const about = document.querySelector('#panel-about .card.help');
+  if (!about) return;
+  for (const p of about.querySelectorAll('p')) {
+    if (p.textContent.startsWith('Public Share can hide')) {
+      p.innerHTML = 'Public Share uses a self-contained <code>ICS1</code> URL fragment. The reversible payload is carried by the link itself, with optional gzip compression, SHA-256 integrity, and a random throwaway salt so repeated shares of the same bytes can have different-looking URLs.';
+    } else if (p.textContent.startsWith('Everything executes as JavaScript')) {
+      p.textContent = 'Everything executes as JavaScript in the browser. GitHub Pages only serves static application files; self-contained share payloads live after the URL # fragment and are not sent to GitHub as part of the HTTP request.';
+    }
+  }
+}
+
 function installShareShell() {
   const nav = document.querySelector('.tabs');
   const main = document.querySelector('main');
   if (!nav || !main) return;
+
+  patchAboutCopy();
 
   let tab = nav.querySelector('[data-tab="share"]');
   if (!tab) {
@@ -24,7 +38,7 @@ function installShareShell() {
     panel = document.createElement('section');
     panel.id = 'panel-share';
     panel.className = 'panel';
-    panel.innerHTML = '<div class="card"><div class="notice">Loading public sharing…</div></div>';
+    panel.innerHTML = '<div class="card"><div class="notice">Loading self-contained sharing…</div></div>';
     const aboutPanel = document.querySelector('#panel-about');
     main.insertBefore(panel, aboutPanel || null);
   }
@@ -42,8 +56,8 @@ function installShareShell() {
     });
   });
 
-  import('./public-share.js?v=20260812share1').catch(error => {
-    panel.innerHTML = `<div class="card"><div class="notice error">Could not load public sharing: ${String(error.message || error)}</div></div>`;
+  import('./public-share.js?v=20260812ics1').catch(error => {
+    panel.innerHTML = `<div class="card"><div class="notice error">Could not load self-contained sharing: ${String(error.message || error)}</div></div>`;
   });
 }
 

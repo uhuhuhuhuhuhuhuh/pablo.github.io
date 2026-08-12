@@ -1,5 +1,3 @@
-import './public-share-bootstrap.js?v=20260812share1';
-
 function loadXlDeepLink() {
   const raw = window.location.hash.replace(/^#/, '');
   if (!raw) return;
@@ -19,6 +17,10 @@ function loadXlDeepLink() {
   input.value = recipe;
   loadButton.click();
 }
+
+import('./public-share-bootstrap.js?v=20260812ics1').catch(error => {
+  console.error('Could not load Public Share:', error);
+});
 
 if (document.readyState === 'complete') loadXlDeepLink();
 else window.addEventListener('load', loadXlDeepLink, { once: true });
