@@ -2,7 +2,7 @@ import { bytesToPath, pathToBytes, normalizePath, formatBytes } from './codec.js
 
 const $ = (s) => document.querySelector(s);
 const encoder = new TextEncoder();
-const HARD_MAX_BYTES = 16 * 1024;
+const HARD_MAX_BYTES = 1024 ** 4; // 1 TiB
 const HARD_REPEAT_CAP = 4096;
 const HARD_BUDGET = 50000;
 
@@ -201,7 +201,7 @@ function addDeepControls() {
     <div class="grid-3" style="margin-top:16px">
       <div><label for="regex-depth-mode">Depth bias</label><select id="regex-depth-mode" class="input"><option value="deep" selected>Deep</option><option value="deepest">Maximum depth</option><option value="balanced">Balanced</option></select></div>
       <div><label for="regex-min-bytes">Minimum bytes</label><input id="regex-min-bytes" type="number" min="0" max="${HARD_MAX_BYTES}" value="0"></div>
-      <div><label for="regex-max-bytes">Maximum bytes</label><input id="regex-max-bytes" type="number" min="1" max="${HARD_MAX_BYTES}" value="4096"></div>
+      <div><label for="regex-max-bytes">Maximum bytes (up to 1 TiB)</label><input id="regex-max-bytes" type="number" min="1" max="${HARD_MAX_BYTES}" value="4096"></div>
       <div><label for="regex-repeat-cap">Unbounded repeat cap</label><input id="regex-repeat-cap" type="number" min="1" max="${HARD_REPEAT_CAP}" value="256"></div>
       <div><label for="regex-budget">Candidate attempts</label><input id="regex-budget" type="number" min="100" max="${HARD_BUDGET}" value="5000"></div>
       <div><label>Ranking</label><div class="pill" style="display:inline-block">Largest/deepest first</div></div>
@@ -260,7 +260,7 @@ async function runDeepRegex() {
     }
 
     if (!candidates.length) {
-      target.innerHTML = `<div class="notice warn">No generated matches landed between ${minBytes.toLocaleString()} and ${maxBytes.toLocaleString()} bytes. Lower the minimum byte size, raise the unbounded repeat cap, or use a pattern with <code>*</code>, <code>+</code>, or <code>{m,n}</code> so the match can actually grow.</div>`;
+      target.innerHTML = `<div class="notice warn">No generated matches landed between ${formatBytes(minBytes)} and ${formatBytes(maxBytes)}. Lower the minimum byte size, raise the unbounded repeat cap, or use a pattern with <code>*</code>, <code>+</code>, or <code>{m,n}</code> so the match can actually grow.</div>`;
       if (status) status.textContent = `Finished ${budget.toLocaleString()} attempts with no in-range matches.`;
       return;
     }
