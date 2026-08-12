@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#071019">
   <meta name="description" content="The Infinite Corridor is a self-contained browser file sharing service. Create a share link locally with no upload server or account.">
   <title>The Infinite Corridor</title>
-  <link rel="stylesheet" href="./styles.css?v=20260812share2">
+  <link rel="stylesheet" href="./styles.css?v=20260812share3">
 </head>
 <body>
   <div class="site-shell">
@@ -36,7 +36,7 @@
           <span class="upload-glyph" aria-hidden="true"><span></span></span>
           <strong>Drop a file here</strong>
           <span>or click to browse your computer</span>
-          <small>Nothing is uploaded to a file server.</small>
+          <small>No fixed source-file cap. The final self-contained token must fit within 1,500,000 characters.</small>
         </button>
 
         <div id="file-card" class="file-card" hidden>
@@ -50,7 +50,7 @@
 
         <div class="action-area">
           <button id="create-link" class="primary-button" type="button" disabled>Create share link</button>
-          <div id="status" class="status-line" role="status">Choose a file to begin.</div>
+          <div id="status" class="status-line" role="status">Choose a file to begin. There is no fixed source-file cap; the final token must stay under 1,500,000 characters.</div>
         </div>
 
         <div id="share-result" class="share-result" hidden>
@@ -63,19 +63,19 @@
 
       <section class="service-info" aria-label="How sharing works">
         <article><span>01</span><strong>Pick a file</strong><p>The browser reads it locally.</p></article>
-        <article><span>02</span><strong>Copy the link</strong><p>Each link gets fresh random salt.</p></article>
+        <article><span>02</span><strong>Compress and copy</strong><p>Larger files can work when they compress enough to fit the link.</p></article>
         <article><span>03</span><strong>Recipient downloads</strong><p>The file is reconstructed and verified locally.</p></article>
       </section>
 
       <section class="fine-print">
-        <strong>Self-contained links</strong>
-        <p>The link carries the reversible file data itself. This works best for small files and compressible content. Already-compressed media can produce very long links, and the browser will reject a link that exceeds the service safety limit. The random salt changes the appearance of repeated links but is not encryption.</p>
+        <strong>Adaptive file size</strong>
+        <p>There is no arbitrary source-file size ceiling. The practical limit is the final self-contained share token, currently capped at 1,500,000 characters. An incompressible file can fit only about 1.07 MiB of raw data, while a much larger text, JSON, CSV, log, or other highly compressible file can work if gzip reduces it enough. Very large source files may require substantial browser memory while the link is created.</p>
       </section>
     </main>
 
     <footer><span>THE INFINITE CORRIDOR</span><span>No account · no registry · no file server</span></footer>
   </div>
 
-  <script type="module" src="./public-share.js?v=20260812share2"></script>
+  <script type="module" src="./public-share.js?v=20260812share3"></script>
 </body>
 </html>
