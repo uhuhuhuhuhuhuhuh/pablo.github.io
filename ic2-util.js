@@ -118,7 +118,6 @@ const K = new Uint32Array([
   0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
   0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
 ]);
-const rotr = (x,n) => (x >>> n) | (x << (32-n));
 export class Sha256 {
   constructor() {
     this.h = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
@@ -139,13 +138,24 @@ export class Sha256 {
     return this;
   }
   _block(d, off) {
-    const w=this.w;
-    for(let i=0;i<16;i++){const j=off+i*4;w[i]=((d[j]<<24)|(d[j+1]<<16)|(d[j+2]<<8)|d[j+3])>>>0;}
-    for(let i=16;i<64;i++){const a=w[i-15],b=w[i-2];const s0=(rotr(a,7)^rotr(a,18)^(a>>>3))>>>0;const s1=(rotr(b,17)^rotr(b,19)^(b>>>10))>>>0;w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;}
-    let [a,b,c,d0,e,f,g,h]=this.h;
-    for(let i=0;i<64;i++){const S1=(rotr(e,6)^rotr(e,11)^rotr(e,25))>>>0;const ch=((e&f)^((~e)&g))>>>0;const t1=(h+S1+ch+K[i]+w[i])>>>0;const S0=(rotr(a,2)^rotr(a,13)^rotr(a,22))>>>0;const maj=((a&b)^(a&c)^(b&c))>>>0;const t2=(S0+maj)>>>0;h=g;g=f;f=e;e=(d0+t1)>>>0;d0=c;c=b;b=a;a=(t1+t2)>>>0;}
-    this.h[0]=(this.h[0]+a)>>>0;this.h[1]=(this.h[1]+b)>>>0;this.h[2]=(this.h[2]+c)>>>0;this.h[3]=(this.h[3]+d0)>>>0;
-    this.h[4]=(this.h[4]+e)>>>0;this.h[5]=(this.h[5]+f)>>>0;this.h[6]=(this.h[6]+g)>>>0;this.h[7]=(this.h[7]+h)>>>0;
+    // Hot loop: locals and inlined rotations keep V8 on its fast integer path.
+    const w=this.w, H=this.h;
+    for(let i=0,j=off;i<16;i++,j+=4)w[i]=(d[j]<<24)|(d[j+1]<<16)|(d[j+2]<<8)|d[j+3];
+    for(let i=16;i<64;i++){
+      const x=w[i-15],y=w[i-2];
+      const s0=((x>>>7)|(x<<25))^((x>>>18)|(x<<14))^(x>>>3);
+      const s1=((y>>>17)|(y<<15))^((y>>>19)|(y<<13))^(y>>>10);
+      w[i]=(w[i-16]+s0+w[i-7]+s1)|0;
+    }
+    let a=H[0]|0,b=H[1]|0,c=H[2]|0,d0=H[3]|0,e=H[4]|0,f=H[5]|0,g=H[6]|0,h=H[7]|0;
+    for(let i=0;i<64;i++){
+      const S1=((e>>>6)|(e<<26))^((e>>>11)|(e<<21))^((e>>>25)|(e<<7));
+      const t1=(h+S1+((e&f)^(~e&g))+K[i]+w[i])|0;
+      const S0=((a>>>2)|(a<<30))^((a>>>13)|(a<<19))^((a>>>22)|(a<<10));
+      const t2=(S0+((a&b)^(a&c)^(b&c)))|0;
+      h=g;g=f;f=e;e=(d0+t1)|0;d0=c;c=b;b=a;a=(t1+t2)|0;
+    }
+    H[0]+=a;H[1]+=b;H[2]+=c;H[3]+=d0;H[4]+=e;H[5]+=f;H[6]+=g;H[7]+=h;
   }
   digest() {
     if (this.finished) throw new Error('SHA-256 already finalized.');
