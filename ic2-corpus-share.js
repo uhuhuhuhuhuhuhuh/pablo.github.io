@@ -1,5 +1,5 @@
 import {
-  MAX_TOKEN_CHARS, FASTCDC, BinWriter, BinReader,
+  MAX_TOKEN_CHARS, FASTCDC, FastCdc, BinWriter, BinReader,
   bytesToBase64Url, base64UrlToBytes, equalBytes, hex, Sha256, sha256
 } from './ic2-util.js';
 import { CODEC, compressBest, compressOuter, decompressOuter, decompressByCodec } from './compression.js';
@@ -13,6 +13,9 @@ const MAX_REPEAT_PATTERN = 256;
 const MAX_SOURCES = 10000;
 const MAX_URL_BYTES = 8192;
 const MAX_SEGMENTS = 500000;
+const LINK_BINARY_BUDGET = Math.floor(MAX_TOKEN_CHARS * 3 / 4) - 2048;
+const MAX_RANGE_BYTES = 8 * 1024 * 1024;
+const PREFETCH_RANGES = 4;
 const TE = new TextEncoder();
 const TD = new TextDecoder();
 
@@ -20,16 +23,6 @@ export const CORPUS_KIND = Object.freeze({ CORPUS:0, RAW:1, COMPRESSED:2, ZERO:3
 export const CORPUS_KIND_NAME = Object.freeze({
   0:'public corpus exact reference', 1:'raw', 2:'compressed', 3:'zero recipe', 4:'constant recipe', 5:'repeat recipe', 6:'deduplicated reference'
 });
-
-const GEAR = (() => {
-  const t = new Uint32Array(256);
-  let x = 0x9e3779b9;
-  for (let i = 0; i < 256; i++) {
-    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
-    t[i] = x >>> 0;
-  }
-  return t;
-})();
 
 function cancelCheck(signal) { if (signal?.cancelled) throw new Error('Encoding cancelled.'); }
 
@@ -81,7 +74,7 @@ export async function encodeFileToIc2Corpus(file, { onProgress=()=>{}, signal=nu
     corpus:{ available:true, catalogSources:catalog.sources, catalogChunks:catalog.uniqueChunks, matchedChunks:0, matchedBytes:0, distinctSources:0 }
   };
   const batch = [];
-  let bytesSeen = 0;
+  let bytesSeen = 0, embedded = 0, sourceBytes = 0;
 
   const processBatch = async () => {
     if (!batch.length) return;
@@ -97,6 +90,7 @@ export async function encodeFileToIc2Corpus(file, { onProgress=()=>{}, signal=nu
         rep = { kind:CORPUS_KIND.REF, base:seen.get(item.hashHex).segmentIndex };
       } else if (matches[i]) {
         const match = matches[i];
+        if (!sourceIndex.has(match.url)) sourceBytes += TE.encode(match.url).length + 2;
         rep = { kind:CORPUS_KIND.CORPUS, source:assignSource(sourceUrls, sourceIndex, match.url), offset:match.offset };
         stats.corpus.matchedChunks++;
         stats.corpus.matchedBytes += chunk.length;
@@ -111,20 +105,21 @@ export async function encodeFileToIc2Corpus(file, { onProgress=()=>{}, signal=nu
       segments.push(seg);
       if (!seen.has(item.hashHex)) seen.set(item.hashHex, { segmentIndex:idx, unitLen:chunk.length });
       stats.chunks++; stats.rawBytes += chunk.length; addStat(stats, seg, chunk.length);
+      embedded += payloadBytes(seg);
+      // Fail fast (like IC2) instead of compressing the rest of a file that can no longer fit.
+      if (64 + sourceBytes + embedded + segments.length * 44 > LINK_BINARY_BUDGET * 1.12) {
+        const e = new Error('Corpus-assisted descriptor already exceeds the link budget.'); e.code = 'IC2C_LINK_BUDGET'; throw e;
+      }
     }
     batch.length = 0;
     stats.corpus.distinctSources = sourceUrls.length;
     onProgress({ phase:'corpus', done:bytesSeen, total:file.size, segments:segments.length, stats });
   };
 
-  const current = new Uint8Array(FASTCDC.max);
-  let currentLen = 0, gear = 0;
-  const flush = async () => {
-    if (!currentLen) return;
-    const bytes = current.slice(0, currentLen);
+  const cdc = new FastCdc();
+  const add = async bytes => {
     const hashBytes = sha256(bytes);
     batch.push({ bytes, hashBytes, hashHex:hex(hashBytes) });
-    currentLen = 0; gear = 0;
     if (batch.length >= BATCH_CHUNKS) await processBatch();
   };
 
@@ -135,16 +130,11 @@ export async function encodeFileToIc2Corpus(file, { onProgress=()=>{}, signal=nu
     if (done) break;
     const input = value instanceof Uint8Array ? value : new Uint8Array(value);
     fileHasher.update(input); bytesSeen += input.length;
-    for (let i = 0; i < input.length; i++) {
-      const b = input[i]; current[currentLen++] = b; gear = ((gear << 1) + GEAR[b]) >>> 0;
-      if (currentLen >= FASTCDC.min) {
-        const mask = currentLen < FASTCDC.avg ? 0x1ffff : 0x7fff;
-        if (currentLen >= FASTCDC.max || (gear & mask) === 0) await flush();
-      }
-    }
+    for (const chunk of cdc.push(input)) await add(chunk);
     onProgress({ phase:'analyze', done:bytesSeen, total:file.size, segments:segments.length, stats });
   }
-  await flush(); await processBatch();
+  for (const chunk of cdc.finish()) await add(chunk);
+  await processBatch();
 
   if (!stats.corpus.matchedChunks) {
     const e = new Error('No exact public corpus chunks matched this file.'); e.code = 'IC2C_NO_MATCH'; throw e;
@@ -232,10 +222,24 @@ function recipeUnit(s) {
   return null;
 }
 
-async function decodeUnit(manifest, s, index, cache) {
+// Consecutive segments that read adjacent bytes of the same source are fetched
+// with one Range request instead of one request per chunk.
+export function planCorpusRanges(segments) {
+  const ranges = [], rangeOf = new Map();
+  let g = null;
+  segments.forEach((s, i) => {
+    if (s.kind !== CORPUS_KIND.CORPUS) { g = null; return; }
+    if (g && g.source === s.source && g.offset + g.length === s.offset && g.length + s.unitLen <= MAX_RANGE_BYTES) { g.length += s.unitLen; g.last = i; }
+    else { g = { source:s.source, offset:s.offset, length:s.unitLen, last:i }; ranges.push(g); }
+    rangeOf.set(i, ranges.length - 1);
+  });
+  return { ranges, rangeOf };
+}
+
+async function decodeUnit(manifest, s, index, cache, fetched) {
   let out = recipeUnit(s);
   if (!out) {
-    if (s.kind === CORPUS_KIND.CORPUS) out = await fetchCorpusRange(manifest.sources[s.source], s.offset, s.unitLen);
+    if (s.kind === CORPUS_KIND.CORPUS) out = fetched;
     else if (s.kind === CORPUS_KIND.RAW) out = s.data.slice();
     else if (s.kind === CORPUS_KIND.COMPRESSED) out = await decompressByCodec(s.codec, s.data, s.unitLen);
     else if (s.kind === CORPUS_KIND.REF) { const base = cache.get(s.base); if (!base) throw new Error(`Missing IC2C reference base ${s.base}.`); out = base.slice(); }
@@ -248,9 +252,25 @@ async function decodeUnit(manifest, s, index, cache) {
 export async function decodeIc2CorpusToSink(manifest, sink, { onProgress=()=>{}, signal=null }={}) {
   const referenced = new Set(manifest.segments.filter(s => s.kind === CORPUS_KIND.REF).map(s => s.base));
   const cache = new Map(), hasher = new Sha256(); let written = 0;
+  const { ranges, rangeOf } = planCorpusRanges(manifest.segments), inflight = new Map();
+  const startRange = r => {
+    if (r >= ranges.length || inflight.has(r)) return;
+    const g = ranges[r], p = fetchCorpusRange(manifest.sources[g.source], g.offset, g.length);
+    p.catch(() => {}); // surfaced when awaited below
+    inflight.set(r, p);
+  };
   for (let i = 0; i < manifest.segments.length; i++) {
     cancelCheck(signal);
-    const unit = await decodeUnit(manifest, manifest.segments[i], i, cache);
+    const s = manifest.segments[i];
+    let fetched = null;
+    if (s.kind === CORPUS_KIND.CORPUS) {
+      const r = rangeOf.get(i), g = ranges[r];
+      for (let k = r; k < r + PREFETCH_RANGES; k++) startRange(k);
+      const bytes = await inflight.get(r);
+      fetched = bytes.slice(s.offset - g.offset, s.offset - g.offset + s.unitLen);
+      if (g.last === i) inflight.delete(r);
+    }
+    const unit = await decodeUnit(manifest, s, i, cache, fetched);
     if (referenced.has(i)) cache.set(i, unit);
     hasher.update(unit); await sink.write(unit); written += unit.length;
     onProgress({ segment:i + 1, segments:manifest.segments.length, written, total:manifest.totalSize });

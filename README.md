@@ -95,6 +95,18 @@ Encoding runs in a Web Worker and never loads the entire source with `file.array
 
 The site pins `@bokuweb/zstd-wasm` `0.0.27`. If it cannot load during encoding, the encoder falls back to browser gzip/raw. Dictionary compression is only considered when the pinned runtime exposes dictionary APIs.
 
+## Development
+
+The site is plain static files with no build step. Serve the repository root with any static server (for example `python3 -m http.server`) and open it in a browser.
+
+The codecs are covered by a Node test suite (Node 20 or newer, no dependencies):
+
+`npm test`
+
+Under Node the CDN-hosted Zstandard module cannot load, so the tests exercise the gzip/raw fallback paths. The suite covers SHA-256, varints and Base64URL, IC2 round trips for recipes, deduplication and deltas, tamper detection, legacy ICS1 tokens, and IC2C encode/decode against a mocked corpus catalog and range-serving source. GitHub Actions runs it on every push.
+
+The service worker is network-first: it caches the app shell only as an offline fallback, so deploys reach visitors right away.
+
 ## Canonical site
 
 `https://uhuhuhuhuhuhuhuh.github.io/pablo.github.io/`

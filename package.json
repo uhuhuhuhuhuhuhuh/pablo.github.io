@@ -1,0 +1,10 @@
+{
+  "name": "infinite-corridor",
+  "private": true,
+  "description": "Static client-side exact file sharing (IC2 / IC2C codecs).",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
