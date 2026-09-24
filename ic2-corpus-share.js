@@ -1,5 +1,5 @@
 import {
-  MAX_TOKEN_CHARS, FASTCDC, BinWriter, BinReader,
+  MAX_TOKEN_CHARS, FASTCDC, FastCdc, BinWriter, BinReader,
   bytesToBase64Url, base64UrlToBytes, equalBytes, hex, Sha256, sha256
 } from './ic2-util.js';
 import { CODEC, compressBest, compressOuter, decompressOuter, decompressByCodec } from './compression.js';
@@ -23,16 +23,6 @@ export const CORPUS_KIND = Object.freeze({ CORPUS:0, RAW:1, COMPRESSED:2, ZERO:3
 export const CORPUS_KIND_NAME = Object.freeze({
   0:'public corpus exact reference', 1:'raw', 2:'compressed', 3:'zero recipe', 4:'constant recipe', 5:'repeat recipe', 6:'deduplicated reference'
 });
-
-const GEAR = (() => {
-  const t = new Uint32Array(256);
-  let x = 0x9e3779b9;
-  for (let i = 0; i < 256; i++) {
-    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
-    t[i] = x >>> 0;
-  }
-  return t;
-})();
 
 function cancelCheck(signal) { if (signal?.cancelled) throw new Error('Encoding cancelled.'); }
 
@@ -126,14 +116,10 @@ export async function encodeFileToIc2Corpus(file, { onProgress=()=>{}, signal=nu
     onProgress({ phase:'corpus', done:bytesSeen, total:file.size, segments:segments.length, stats });
   };
 
-  const current = new Uint8Array(FASTCDC.max);
-  let currentLen = 0, gear = 0;
-  const flush = async () => {
-    if (!currentLen) return;
-    const bytes = current.slice(0, currentLen);
+  const cdc = new FastCdc();
+  const add = async bytes => {
     const hashBytes = sha256(bytes);
     batch.push({ bytes, hashBytes, hashHex:hex(hashBytes) });
-    currentLen = 0; gear = 0;
     if (batch.length >= BATCH_CHUNKS) await processBatch();
   };
 
@@ -144,16 +130,11 @@ export async function encodeFileToIc2Corpus(file, { onProgress=()=>{}, signal=nu
     if (done) break;
     const input = value instanceof Uint8Array ? value : new Uint8Array(value);
     fileHasher.update(input); bytesSeen += input.length;
-    for (let i = 0; i < input.length; i++) {
-      const b = input[i]; current[currentLen++] = b; gear = ((gear << 1) + GEAR[b]) >>> 0;
-      if (currentLen >= FASTCDC.min) {
-        const mask = currentLen < FASTCDC.avg ? 0x1ffff : 0x7fff;
-        if (currentLen >= FASTCDC.max || (gear & mask) === 0) await flush();
-      }
-    }
+    for (const chunk of cdc.push(input)) await add(chunk);
     onProgress({ phase:'analyze', done:bytesSeen, total:file.size, segments:segments.length, stats });
   }
-  await flush(); await processBatch();
+  for (const chunk of cdc.finish()) await add(chunk);
+  await processBatch();
 
   if (!stats.corpus.matchedChunks) {
     const e = new Error('No exact public corpus chunks matched this file.'); e.code = 'IC2C_NO_MATCH'; throw e;

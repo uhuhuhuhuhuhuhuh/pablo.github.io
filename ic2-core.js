@@ -1,5 +1,5 @@
 import {
-  MAX_TOKEN_CHARS, FASTCDC, BinWriter, BinReader,
+  MAX_TOKEN_CHARS, FASTCDC, FastCdc, BinWriter, BinReader,
   bytesToBase64Url, base64UrlToBytes, equalBytes, hex, Sha256, sha256
 } from './ic2-util.js';
 import {
@@ -26,16 +26,6 @@ const MAX_REPEAT_PATTERN = 256;
 const MAX_DICTIONARY_BYTES = 64 * 1024;
 const LEARNING_SAMPLE_BYTES = 2048;
 const MAX_LEARNING_SAMPLES = 20;
-
-const GEAR = (() => {
-  const t = new Uint32Array(256);
-  let x = 0x9e3779b9;
-  for (let i=0;i<256;i++) {
-    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
-    t[i] = x >>> 0;
-  }
-  return t;
-})();
 
 function isCancelled(signal) { return !!signal?.cancelled; }
 function cancelCheck(signal) { if (isCancelled(signal)) throw new Error('Encoding cancelled.'); }
@@ -199,7 +189,7 @@ export async function encodeFileToIc2(file, {onProgress=()=>{}, signal=null, kno
     chunks:0,segments:0,rawBytes:0,embeddedBytes:0,byKind:{},fastcdc:FASTCDC,
     knowledge:{profile:knowledge?.profile||'',sampleCount:knowledge?.sampleCount||0,observedFiles:knowledge?.observedFiles||0,availableDictionaryBytes:candidateDictionary.length,dictionaryUsed:false,dictionarySavings:0,dictionaryUses:0}
   };
-  const current=new Uint8Array(FASTCDC.max); let currentLen=0, gear=0;
+  const cdc=new FastCdc();
   const processChunk=async (chunk) => {
     cancelCheck(signal);
     const hashBytes=sha256(chunk), hashHex=hex(hashBytes), prev=segments[segments.length-1];
@@ -219,19 +209,15 @@ export async function encodeFileToIc2(file, {onProgress=()=>{}, signal=null, kno
       e.code='IC2_LINK_BUDGET'; throw e;
     }
   };
-  const flush=async()=>{ if(!currentLen)return; const chunk=current.slice(0,currentLen); currentLen=0;gear=0; await processChunk(chunk); };
   const reader=file.stream().getReader();
   while(true){
     cancelCheck(signal);
     const {value,done}=await reader.read(); if(done)break;
     const input=value instanceof Uint8Array?value:new Uint8Array(value); fileHasher.update(input); bytesSeen += input.length;
-    for(let i=0;i<input.length;i++){
-      const b=input[i]; current[currentLen++]=b; gear=((gear<<1)+GEAR[b])>>>0;
-      if(currentLen>=FASTCDC.min){ const mask=currentLen<FASTCDC.avg?0x1ffff:0x7fff; if(currentLen>=FASTCDC.max || (gear&mask)===0) await flush(); }
-    }
+    for(const chunk of cdc.push(input)) await processChunk(chunk);
     onProgress({phase:'analyze',done:bytesSeen,total:file.size,segments:segments.length,stats});
   }
-  await flush();
+  for(const chunk of cdc.finish()) await processChunk(chunk);
   const fileHash=fileHasher.digest();
   const dictionary=finalizeDictionary(segments,candidateDictionary,stats);
   embedded=segments.reduce((n,s)=>n+encodedPayloadBytes(s),0);

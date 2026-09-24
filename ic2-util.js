@@ -2,6 +2,33 @@ export const IC2_VERSION = 2;
 export const MAX_TOKEN_CHARS = 1_500_000;
 export const FASTCDC = Object.freeze({ min: 16 * 1024, avg: 64 * 1024, max: 256 * 1024, version: 1 });
 
+const GEAR = (() => {
+  const t = new Uint32Array(256);
+  let x = 0x9e3779b9;
+  for (let i = 0; i < 256; i++) { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; t[i] = x >>> 0; }
+  return t;
+})();
+
+// Content-defined chunker shared by both encoders and the corpus tools. Boundaries
+// must stay byte-identical to tools/build_ic2_corpus_catalog.py or corpus lookups miss.
+export class FastCdc {
+  constructor() { this.buf = new Uint8Array(FASTCDC.max); this.len = 0; this.gear = 0; }
+  push(input) {
+    const out = [], buf = this.buf;
+    let len = this.len, gear = this.gear;
+    for (let i = 0; i < input.length; i++) {
+      const b = input[i]; buf[len++] = b; gear = ((gear << 1) + GEAR[b]) >>> 0;
+      if (len >= FASTCDC.min) {
+        const mask = len < FASTCDC.avg ? 0x1ffff : 0x7fff;
+        if (len >= FASTCDC.max || (gear & mask) === 0) { out.push(buf.slice(0, len)); len = 0; gear = 0; }
+      }
+    }
+    this.len = len; this.gear = gear;
+    return out;
+  }
+  finish() { const out = this.len ? [this.buf.slice(0, this.len)] : []; this.len = 0; this.gear = 0; return out; }
+}
+
 export function bytesToBase64Url(bytes) {
   let binary = '';
   const step = 0x8000;
